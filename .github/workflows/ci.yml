@@ -26,7 +26,7 @@ jobs:
         env: [lint, type, docs]
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.0
       - run: uvx --with tox-uv tox -e ${{ matrix.env }}
 
   test:
@@ -42,7 +42,7 @@ jobs:
           - { os: windows-latest, python: "3.14" }
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.0
       - run: uvx --with tox-uv tox -e ${{ matrix.python }}
 
   bundle:
@@ -50,7 +50,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.0
       - uses: actions/setup-node@v7
         with:
           node-version: lts/*
