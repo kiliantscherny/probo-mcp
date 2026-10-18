@@ -126,6 +126,8 @@ function actions(...buttons) {
   return div;
 }
 const openInProbo = (url) => () => app.openLink({ url });
+// Messages sent "as the user" carry only opaque ids, never ProBo text: subjects and file names are written
+// by other people, so the model must fetch them through tools (where they are clearly tool output).
 const ask = (text) => () => app.sendMessage({ role: "user", content: [{ type: "text", text }] });
 
 async function call(name, args = {}) {
@@ -143,7 +145,7 @@ async function guarded(target, fn) {
 const showMessage = (m) => guarded(detailEl, async () => {
   const t = await call("get_message", { message_id: m.id });
   detailEl.innerHTML = `<h2>${esc(t.subject)}</h2>`;
-  detailEl.append(actions(["Open in ProBo", openInProbo(t.url)], ["Ask Claude about this", ask(`Summarise the ProBo message thread "${t.subject}" (message_id ${t.id}).`), true]));
+  detailEl.append(actions(["Open in ProBo", openInProbo(t.url)], ["Ask Claude about this", ask(`Summarise the ProBo message thread with message_id ${t.id}.`), true]));
   for (const c of t.messages) {
     const a = document.createElement("article");
     a.innerHTML = `<div class="meta">${esc(c.sender)} · ${esc(c.date_text)}${c.recipients ? " · to " + esc(c.recipients) : ""}</div>${markdown(c.body_markdown)}`
@@ -154,14 +156,14 @@ const showMessage = (m) => guarded(detailEl, async () => {
 const showNews = (n) => guarded(detailEl, async () => {
   const item = await call("get_news", { news_id: n.id });
   detailEl.innerHTML = `<h2>${esc(item.title || n.subject)}</h2><div class="meta">${esc(item.date_text || n.date_text)}</div>`;
-  detailEl.append(actions(["Open in ProBo", openInProbo(item.url)], ["Ask Claude about this", ask(`Summarise the ProBo news post "${item.title}" (news_id ${item.id}).`), true]));
+  detailEl.append(actions(["Open in ProBo", openInProbo(item.url)], ["Ask Claude about this", ask(`Summarise the ProBo news post with news_id ${item.id}.`), true]));
   const body = document.createElement("div");
   body.innerHTML = markdown(item.content_markdown) + (item.comments_markdown ? "<h3>Comments</h3>" + markdown(item.comments_markdown) : "");
   detailEl.append(body);
 });
 const showDocument = (d) => guarded(detailEl, async () => {
   detailEl.innerHTML = `<h2>${esc(d.name)}</h2><div class="meta">${esc(d.folder || "")} ${esc(d.added_text || d.date_text || "")}</div>`;
-  detailEl.append(actions(["Open in ProBo", openInProbo(d.url)], ["Summarise with Claude", ask(`Summarise the ProBo document "${d.name}" (document_id ${d.id}).`), true]));
+  detailEl.append(actions(["Open in ProBo", openInProbo(d.url)], ["Summarise with Claude", ask(`Summarise the ProBo document with document_id ${d.id}.`), true]));
   const pre = document.createElement("pre");
   pre.textContent = "Extracting text…";
   detailEl.append(pre);

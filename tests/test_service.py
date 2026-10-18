@@ -63,7 +63,7 @@ async def test_read_document_truncates(settings: Settings, probo_site: respx.Rou
 
 async def test_save_document_uses_safe_names(service: ProboService, settings: Settings) -> None:
     saved = await service.save_document(FILE_ID, "../../etc/passwd")
-    assert Path(saved.path).parent == settings.download_dir
+    assert Path(saved.path).parent == settings.download_dir.resolve()
     assert saved.filename == "_.._etc_passwd"
 
 
@@ -90,6 +90,19 @@ def test_extract_text_scanned_pdf() -> None:
     assert "no extractable text" in note
 
 
-@pytest.mark.parametrize(("name", "safe"), [("a/b\\c.pdf", "a_b_c.pdf"), ("...", "document"), (".env", "env")])
+@pytest.mark.parametrize(
+    ("name", "safe"),
+    [
+        ("a/b\\c.pdf", "a_b_c.pdf"),
+        ("...", "document"),
+        (".env", "env"),
+        ('C:report<1>|"2"?*.pdf', "C_report_1___2___.pdf"),
+        ("Referat æøå (endelig).pdf", "Referat æøå (endelig).pdf"),
+        ("CON.pdf", "_CON.pdf"),
+        ("lpt1", "_lpt1"),
+        ("trailing. ", "trailing"),
+        ("x" * 300, "x" * 200),
+    ],
+)
 def test_safe_filename(name: str, safe: str) -> None:
     assert safe_filename(name) == safe

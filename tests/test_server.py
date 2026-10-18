@@ -186,7 +186,7 @@ async def test_small_download_saves_without_asking(server: MCPServer, settings: 
     result = await call(server, "download_document", {"document": FILE_ID}, mode=mode)
     saved = result.structured_content
     assert saved is not None
-    assert Path(saved["path"]) == settings.download_dir / "Budget 2026.pdf"
+    assert Path(saved["path"]) == (settings.download_dir / "Budget 2026.pdf").resolve()
     assert Path(saved["path"]).read_bytes().startswith(b"%PDF")
 
 

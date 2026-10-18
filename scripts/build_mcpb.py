@@ -123,7 +123,9 @@ def stage(manifest_data: dict) -> None:
     shutil.copy2(ROOT / "packaging" / "mcpb" / "server.py", STAGE / "src" / "server.py")
     shutil.copy2(ROOT / "packaging" / "mcpb" / ".mcpbignore", STAGE / ".mcpbignore")
     shutil.copy2(ROOT / "src" / "probo_mcp" / "assets" / "icon.png", STAGE / "icon.png")
-    (STAGE / "manifest.json").write_text(json.dumps(manifest_data, indent=2, ensure_ascii=False) + "\n")
+    (STAGE / "manifest.json").write_text(
+        json.dumps(manifest_data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
 
 
 def pack() -> Path:

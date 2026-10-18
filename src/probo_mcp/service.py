@@ -247,7 +247,10 @@ class ProboService:
     async def save_document(self, document: str, filename: str | None = None) -> SavedFile:
         """Download a document into the configured download directory."""
         f = await self.download(document)
-        target = self.settings.download_dir / safe_filename(filename or f.filename)
+        download_dir = self.settings.download_dir.resolve()
+        target = (download_dir / safe_filename(filename or f.filename)).resolve()
+        if target.parent != download_dir:  # defence in depth: safe_filename already removes separators
+            raise ValueError(f"Refusing to write outside the download folder: {target}")
         await anyio.to_thread.run_sync(_write_file, target, f.content)
         logger.info("Saved %s (%d bytes)", target, len(f.content))
         return SavedFile(path=str(target), filename=target.name, size_bytes=len(f.content), content_type=f.content_type)
@@ -299,7 +302,16 @@ def _write_file(target: Path, content: bytes) -> None:
     target.write_bytes(content)
 
 
+_WINDOWS_DEVICE_NAMES = re.compile(r"^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\.|$)", re.IGNORECASE)
+
+
 def safe_filename(name: str) -> str:
-    """Strip path separators and leading dots so a server-supplied name can't escape the download dir."""
-    cleaned = re.sub(r"[/\\\x00-\x1f]", "_", name).strip().lstrip(".")
-    return cleaned or "document"
+    """Make a server- or model-supplied name safe to use as a single file name on any OS.
+
+    Keeps letters (including æøå), digits, spaces and ``._()-``; everything else
+    (path separators, ``:``, ``<>"|?*``, control characters) becomes ``_``.
+    """
+    cleaned = re.sub(r"[^\w .()\-]", "_", name).strip(" .")
+    if _WINDOWS_DEVICE_NAMES.match(cleaned):
+        cleaned = f"_{cleaned}"
+    return cleaned[:200] or "document"

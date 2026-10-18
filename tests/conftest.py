@@ -24,7 +24,7 @@ LOGIN_HTML = '<form><input type="hidden" name="csrfmiddlewaretoken" value="tok">
 
 
 def load(name: str) -> str:
-    return (FIXTURES / name).read_text()
+    return (FIXTURES / name).read_text(encoding="utf-8")
 
 
 def make_pdf(text: str) -> bytes:

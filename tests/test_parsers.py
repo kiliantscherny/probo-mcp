@@ -6,7 +6,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def load(name: str) -> str:
-    return (FIXTURES / name).read_text()
+    return (FIXTURES / name).read_text(encoding="utf-8")
 
 
 def test_message_list():

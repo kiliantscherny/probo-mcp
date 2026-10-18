@@ -55,7 +55,7 @@ posix_only = pytest.mark.skipif(sys.platform == "win32", reason="fake `op` is a 
 
 def fake_op(tmp_path: Path, script: str) -> str:
     path = tmp_path / "op"
-    path.write_text(f"#!/bin/sh\n{script}\n")
+    path.write_text(f"#!/bin/sh\n{script}\n", encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IEXEC)
     return str(path)
 
