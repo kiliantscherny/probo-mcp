@@ -1,0 +1,173 @@
+[project]
+name = "probo-mcp"
+version = "0.1.0"
+description = "Read-only MCP server for EG ProBo (probo.dk) owners' association portals"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE", "src/probo_mcp/ui/vendor/LICENSE-ext-apps"]
+authors = [{ name = "Kilian Tscherny" }]
+requires-python = ">=3.12"
+keywords = ["mcp", "model-context-protocol", "probo", "ejerforening", "claude"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "Natural Language :: Danish",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Typing :: Typed",
+]
+dependencies = [
+    "httpx>=0.28.1",
+    "markdownify>=1.2.3",
+    "mcp[cli]>=2.3.0,<3",
+    "pydantic>=2.11",
+    "pypdf>=6.0",
+    "selectolax>=1.0.0",
+]
+
+[project.urls]
+Documentation = "https://kiliantscherny.github.io/probo-mcp/"
+Repository = "https://github.com/kiliantscherny/probo-mcp"
+Issues = "https://github.com/kiliantscherny/probo-mcp/issues"
+
+[project.scripts]
+probo-mcp = "probo_mcp.__main__:main"
+
+[build-system]
+requires = ["uv_build>=0.9.26,<1"]
+build-backend = "uv_build"
+
+[dependency-groups]
+test = [
+    "pytest>=9.1",
+    "pytest-asyncio>=1.4",
+    "pytest-cov>=7.1",
+    "respx>=0.23",
+]
+lint = ["ruff>=0.17"]
+type = ["ty>=0.0.89"]
+docs = ["zensical>=0.0.71"]
+dev = [
+    { include-group = "test" },
+    { include-group = "lint" },
+    { include-group = "type" },
+    { include-group = "docs" },
+    "tox>=4.67",
+    "tox-uv>=1.37",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+
+# -- pytest -------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+addopts = ["--strict-markers", "--strict-config", "-ra"]
+markers = ["live: hits a real ProBo site (needs PROBO_* env vars); skipped by default"]
+filterwarnings = ["error", "ignore::DeprecationWarning:selectolax"]
+
+[tool.coverage.run]
+source = ["probo_mcp"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+skip_covered = true
+exclude_also = ["if TYPE_CHECKING:", "if __name__ == .__main__.:", "raise NotImplementedError"]
+
+# -- ruff ---------------------------------------------------------------------
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["src/probo_mcp/ui/vendor"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F",  # pycodestyle, pyflakes
+    "I",            # isort
+    "UP",           # pyupgrade
+    "B",            # bugbear
+    "SIM",          # simplify
+    "C4",           # comprehensions
+    "PIE",
+    "RUF",
+    "ASYNC",        # async pitfalls
+    "S",            # bandit
+    "PT",           # pytest style
+    "PTH",          # pathlib
+    "RET",
+    "TC",           # type-checking imports
+    "FA",
+    "D",            # docstrings (public API)
+]
+ignore = [
+    "D100", "D104", "D105", "D107",  # module/package/magic/__init__ docstrings
+    "D203", "D213",                  # conflicting docstring styles
+    "S603",                          # subprocess call: `op` is invoked with a fixed argv
+    "TC001", "TC002", "TC003",       # pydantic/MCP resolve annotations at runtime
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "D", "ASYNC240"]
+"scripts/**" = ["D", "T20"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.format]
+docstring-code-format = true
+
+# -- ty -----------------------------------------------------------------------
+
+[tool.ty.environment]
+python-version = "3.12"
+
+[tool.ty.src]
+include = ["src", "tests"]
+exclude = ["src/probo_mcp/ui/vendor"]
+
+[tool.ty.terminal]
+error-on-warning = true
+
+# -- tox (with tox-uv: `uvx --with tox-uv tox`) --------------------------------
+
+[tool.tox]
+requires = ["tox>=4.67", "tox-uv>=1.37"]
+env_list = ["3.14", "3.13", "3.12", "lint", "type", "docs"]
+skip_missing_interpreters = true
+
+[tool.tox.env_run_base]
+description = "Run the test suite with coverage on {base_python}"
+runner = "uv-venv-lock-runner"
+dependency_groups = ["test"]
+pass_env = ["CI", "GITHUB_*"]
+commands = [["pytest", "--cov", "--cov-report=term-missing", "--cov-report=xml", { replace = "posargs", extend = true }]]
+
+[tool.tox.env.lint]
+description = "Lint and check formatting with ruff"
+dependency_groups = ["lint"]
+skip_install = true
+commands = [["ruff", "check", "."], ["ruff", "format", "--check", "."]]
+
+[tool.tox.env.type]
+description = "Type-check with ty"
+dependency_groups = ["type", "test"]
+commands = [["ty", "check"]]
+
+[tool.tox.env.docs]
+description = "Build the documentation site with zensical"
+dependency_groups = ["docs"]
+commands = [["zensical", "build", "--clean", "--strict"]]
+
+[tool.tox.env.fix]
+description = "Apply ruff fixes and formatting"
+dependency_groups = ["lint"]
+skip_install = true
+commands = [["ruff", "check", "--fix", "."], ["ruff", "format", "."]]

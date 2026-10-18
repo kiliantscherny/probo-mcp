@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ProBo browser</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: var(--color-background-primary, #ffffff);
+    --bg-2: var(--color-background-secondary, #f4f4f2);
+    --fg: var(--color-text-primary, #1f1f1d);
+    --fg-2: var(--color-text-secondary, #6b6b66);
+    --line: var(--color-border-primary, #e3e3df);
+    --accent: var(--color-text-info, #c4512b);
+    --radius: var(--border-radius-md, 8px);
+    --font: var(--font-sans, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: var(--color-background-primary, #1d1d1b);
+      --bg-2: var(--color-background-secondary, #262624);
+      --fg: var(--color-text-primary, #ecebe6);
+      --fg-2: var(--color-text-secondary, #a3a29b);
+      --line: var(--color-border-primary, #3a3a37);
+      --accent: var(--color-text-info, #e07a52);
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 var(--font); color: var(--fg); background: var(--bg); }
+  header { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 14px; margin: 0; font-weight: 600; }
+  header .site { color: var(--fg-2); font-size: 12px; }
+  nav { display: flex; gap: 4px; margin-left: auto; flex-wrap: wrap; }
+  nav button { border: 0; background: none; color: var(--fg-2); padding: 5px 10px; border-radius: var(--radius); cursor: pointer; font: inherit; }
+  nav button[aria-selected="true"] { background: var(--bg-2); color: var(--fg); font-weight: 600; }
+  main { display: grid; grid-template-columns: minmax(220px, 2fr) 3fr; min-height: 380px; }
+  @media (max-width: 640px) { main { grid-template-columns: 1fr; } }
+  #list { border-right: 1px solid var(--line); overflow: auto; max-height: 560px; }
+  #list button { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line); background: none; color: inherit; padding: 9px 14px; cursor: pointer; font: inherit; }
+  #list button:hover, #list button[aria-current="true"] { background: var(--bg-2); }
+  #list .t { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #list .m { color: var(--fg-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #list h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--fg-2); margin: 12px 14px 4px; }
+  #detail { padding: 14px 18px; overflow: auto; max-height: 560px; }
+  #detail h2 { font-size: 17px; margin: 0 0 4px; }
+  #detail .meta { color: var(--fg-2); font-size: 12px; margin-bottom: 12px; }
+  #detail article { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
+  #detail pre { white-space: pre-wrap; font: 12px/1.5 ui-monospace, monospace; background: var(--bg-2); padding: 10px; border-radius: var(--radius); }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+  .actions button { font: inherit; font-size: 12px; padding: 5px 10px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--bg); color: var(--fg); cursor: pointer; }
+  .actions button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .empty, .error { color: var(--fg-2); padding: 18px; }
+  .error { color: #c0392b; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <div><h1>ProBo</h1><div class="site" id="site"></div></div>
+  <nav role="tablist" id="tabs">
+    <button role="tab" data-view="overview" aria-selected="true">Overview</button>
+    <button role="tab" data-view="messages">Messages</button>
+    <button role="tab" data-view="news">News</button>
+    <button role="tab" data-view="documents">Documents</button>
+    <button role="tab" data-view="pages">Info pages</button>
+  </nav>
+</header>
+<main>
+  <section id="list" aria-label="Items"><div class="empty">Loading…</div></section>
+  <section id="detail" aria-live="polite"><div class="empty">Select an item to read it here.</div></section>
+</main>
+<script type="module">
+/*__EXT_APPS_BUNDLE__*/
+
+const { App, applyDocumentTheme, applyHostStyleVariables, applyHostFonts } = ExtApps;
+const app = new App({ name: "ProBo browser", version: "1.0.0" });
+const $ = (sel) => document.querySelector(sel);
+const listEl = $("#list"), detailEl = $("#detail");
+const state = { view: "overview", overview: null, folderStack: [] };
+
+// -- rendering helpers (all ProBo content is untrusted: escape first) ---------------
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+function inline(s) {
+  return esc(s)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^*])\*(?!\s)(.+?)\*/g, "$1<em>$2</em>")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (_, t, u) => `<a href="${u}" data-link="${u}">${t}</a>`);
+}
+function markdown(md) {
+  const out = [];
+  let list = null;
+  for (const block of String(md ?? "").split(/\n{2,}/)) {
+    const lines = block.split("\n");
+    if (lines.every((l) => /^\s*[-*] /.test(l))) {
+      out.push("<ul>" + lines.map((l) => `<li>${inline(l.replace(/^\s*[-*] /, ""))}</li>`).join("") + "</ul>");
+    } else if (/^#{1,6} /.test(block)) {
+      out.push(`<h3>${inline(block.replace(/^#+ /, ""))}</h3>`);
+    } else if (block.trim()) {
+      out.push(`<p>${lines.map(inline).join("<br>")}</p>`);
+    }
+  }
+  return out.join("");
+}
+function row(title, meta, onClick) {
+  const b = document.createElement("button");
+  b.innerHTML = `<div class="t">${esc(title)}</div><div class="m">${esc(meta)}</div>`;
+  b.addEventListener("click", () => {
+    listEl.querySelectorAll("[aria-current]").forEach((x) => x.removeAttribute("aria-current"));
+    b.setAttribute("aria-current", "true");
+    onClick();
+  });
+  return b;
+}
+function heading(text) { const h = document.createElement("h2"); h.textContent = text; return h; }
+function actions(...buttons) {
+  const div = document.createElement("div");
+  div.className = "actions";
+  for (const [label, fn, primary] of buttons) {
+    const b = document.createElement("button");
+    b.textContent = label;
+    if (primary) b.className = "primary";
+    b.addEventListener("click", fn);
+    div.append(b);
+  }
+  return div;
+}
+const openInProbo = (url) => () => app.openLink({ url });
+const ask = (text) => () => app.sendMessage({ role: "user", content: [{ type: "text", text }] });
+
+async function call(name, args = {}) {
+  const res = await app.callServerTool({ name, arguments: args });
+  if (res.isError) throw new Error(res.content?.map((c) => c.text).join(" ") || `${name} failed`);
+  const data = res.structuredContent ?? {};
+  return "result" in data && Object.keys(data).length === 1 ? data.result : data;
+}
+async function guarded(target, fn) {
+  target.innerHTML = '<div class="empty">Loading…</div>';
+  try { await fn(); } catch (e) { target.innerHTML = `<div class="error">${esc(e.message)}</div>`; }
+}
+
+// -- detail views ---------------------------------------------------------------------
+const showMessage = (m) => guarded(detailEl, async () => {
+  const t = await call("get_message", { message_id: m.id });
+  detailEl.innerHTML = `<h2>${esc(t.subject)}</h2>`;
+  detailEl.append(actions(["Open in ProBo", openInProbo(t.url)], ["Ask Claude about this", ask(`Summarise the ProBo message thread "${t.subject}" (message_id ${t.id}).`), true]));
+  for (const c of t.messages) {
+    const a = document.createElement("article");
+    a.innerHTML = `<div class="meta">${esc(c.sender)} · ${esc(c.date_text)}${c.recipients ? " · to " + esc(c.recipients) : ""}</div>${markdown(c.body_markdown)}`
+      + (c.attachments.length ? `<div class="meta">Attachments: ${c.attachments.map((x) => esc(x.name)).join(", ")}</div>` : "");
+    detailEl.append(a);
+  }
+});
+const showNews = (n) => guarded(detailEl, async () => {
+  const item = await call("get_news", { news_id: n.id });
+  detailEl.innerHTML = `<h2>${esc(item.title || n.subject)}</h2><div class="meta">${esc(item.date_text || n.date_text)}</div>`;
+  detailEl.append(actions(["Open in ProBo", openInProbo(item.url)], ["Ask Claude about this", ask(`Summarise the ProBo news post "${item.title}" (news_id ${item.id}).`), true]));
+  const body = document.createElement("div");
+  body.innerHTML = markdown(item.content_markdown) + (item.comments_markdown ? "<h3>Comments</h3>" + markdown(item.comments_markdown) : "");
+  detailEl.append(body);
+});
+const showDocument = (d) => guarded(detailEl, async () => {
+  detailEl.innerHTML = `<h2>${esc(d.name)}</h2><div class="meta">${esc(d.folder || "")} ${esc(d.added_text || d.date_text || "")}</div>`;
+  detailEl.append(actions(["Open in ProBo", openInProbo(d.url)], ["Summarise with Claude", ask(`Summarise the ProBo document "${d.name}" (document_id ${d.id}).`), true]));
+  const pre = document.createElement("pre");
+  pre.textContent = "Extracting text…";
+  detailEl.append(pre);
+  const doc = await call("read_document", { document: d.id });
+  pre.textContent = doc.text ? doc.text.slice(0, 20000) + (doc.text.length > 20000 || doc.truncated ? "\n…" : "") : doc.note;
+});
+const showPage = (p) => guarded(detailEl, async () => {
+  const page = await call("get_info_page", { page_id: p.id });
+  detailEl.innerHTML = `<h2>${esc(p.title)}</h2>`;
+  detailEl.append(actions(["Open in ProBo", openInProbo(page.url)]));
+  const body = document.createElement("div");
+  body.innerHTML = markdown(page.content_markdown);
+  detailEl.append(body);
+});
+
+// -- list views ---------------------------------------------------------------------
+function renderOverview(o) {
+  listEl.replaceChildren(
+    heading("Messages"), ...o.messages.map((m) => row(m.subject, `${m.sender} · ${m.date_text}`, () => showMessage(m))),
+    heading("News"), ...o.news.map((n) => row(n.subject, n.date_text, () => showNews(n))),
+    heading("Recently added documents"), ...o.recent_documents.map((d) => row(d.name, `${d.date_text} · ${d.folder}`, () => showDocument(d))),
+  );
+}
+async function renderFolder(folderId) {
+  const f = await call("list_documents", folderId ? { folder_id: folderId } : {});
+  const items = [];
+  if (state.folderStack.length) items.push(row("← Back", "", () => { state.folderStack.pop(); guarded(listEl, () => renderFolder(state.folderStack.at(-1))); }));
+  items.push(heading(f.path.slice(2).join(" / ") || "Document archive"));
+  for (const e of f.entries) {
+    items.push(e.kind === "folder"
+      ? row("📁 " + e.name, e.date_text, () => { state.folderStack.push(e.id); guarded(listEl, () => renderFolder(e.id)); })
+      : row(e.name, `${e.date_text}${e.added_text ? " · added " + e.added_text : ""}`, () => showDocument(e)));
+  }
+  listEl.replaceChildren(...items);
+}
+const views = {
+  overview: async () => renderOverview(state.overview ?? (state.overview = await call("get_overview", { limit: 8 }))),
+  messages: async () => listEl.replaceChildren(...(await call("list_messages")).map((m) => row(m.subject, `${m.sender} · ${m.date_text}`, () => showMessage(m)))),
+  news: async () => listEl.replaceChildren(...(await call("list_news")).map((n) => row(n.subject, n.date_text, () => showNews(n)))),
+  documents: async () => { state.folderStack = []; await renderFolder(null); },
+  pages: async () => listEl.replaceChildren(...(await call("list_info_pages")).map((p) => row(p.title, "", () => showPage(p)))),
+};
+function show(view) {
+  state.view = view;
+  for (const b of $("#tabs").children) b.setAttribute("aria-selected", String(b.dataset.view === view));
+  guarded(listEl, views[view]);
+}
+$("#tabs").addEventListener("click", (e) => { const v = e.target.closest("button")?.dataset.view; if (v) show(v); });
+detailEl.addEventListener("click", (e) => { const a = e.target.closest("a[data-link]"); if (a) { e.preventDefault(); app.openLink({ url: a.dataset.link }); } });
+
+// -- host wiring ----------------------------------------------------------------------
+function applyHostContext(ctx) {
+  if (ctx?.theme) applyDocumentTheme(ctx.theme);
+  if (ctx?.styles?.variables) applyHostStyleVariables(ctx.styles.variables);
+  if (ctx?.styles?.css?.fonts) applyHostFonts(ctx.styles.css.fonts);
+}
+app.onhostcontextchanged = applyHostContext;
+app.ontoolinput = (params) => { const v = params?.arguments?.view; if (v && v in views) state.view = v; };
+app.ontoolresult = (result) => {
+  const o = result?.structuredContent;
+  if (o?.site) { state.overview = o; $("#site").textContent = o.site.replace(/^https:\/\//, ""); }
+  show(state.view);
+};
+app.onerror = (e) => console.error(e);
+app.onteardown = async () => ({});
+await app.connect();
+applyHostContext(app.getHostContext());
+// Hosts normally push the tool result right after connecting; load it ourselves if one never arrives.
+setTimeout(() => { if (!state.overview) show(state.view); }, 1500);
+</script>
+</body>
+</html>

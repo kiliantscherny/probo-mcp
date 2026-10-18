@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="probo-mcp">
+  <rect width="128" height="128" rx="28" fill="#C4512B"/>
+  <path d="M30 104V48l26-16 26 16v56z" fill="#FBF3EC"/>
+  <g fill="#C4512B">
+    <rect x="40" y="56" width="9" height="9" rx="1.5"/><rect x="63" y="56" width="9" height="9" rx="1.5"/>
+    <rect x="40" y="73" width="9" height="9" rx="1.5"/><rect x="63" y="73" width="9" height="9" rx="1.5"/>
+    <rect x="50" y="88" width="12" height="16" rx="1.5"/>
+  </g>
+  <path d="M74 26h28a8 8 0 0 1 8 8v18a8 8 0 0 1-8 8H90l-10 9v-9h-6a8 8 0 0 1-8-8V34a8 8 0 0 1 8-8z" fill="#FBF3EC" stroke="#C4512B" stroke-width="4"/>
+  <g fill="#C4512B"><circle cx="79" cy="43" r="3.2"/><circle cx="88" cy="43" r="3.2"/><circle cx="97" cy="43" r="3.2"/></g>
+</svg>

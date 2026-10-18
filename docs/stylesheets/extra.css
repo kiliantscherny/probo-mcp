@@ -1,0 +1,27 @@
+/* Brand colours, taken from the project icon. */
+:root,
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: #c4512b;
+  --md-primary-fg-color--light: #d9744f;
+  --md-primary-fg-color--dark: #a33f1e;
+  --md-accent-fg-color: #a33f1e;
+}
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #c4512b;
+  --md-accent-fg-color: #e8896a;
+  --md-typeset-a-color: #e8896a;
+}
+
+/* Feature cards on the home page. */
+.md-typeset .grid.cards > ul > li {
+  border-radius: 0.6rem;
+}
+.md-typeset .hero-tagline {
+  font-size: 1.15rem;
+  color: var(--md-default-fg-color--light);
+  margin-top: -0.5rem;
+}
+.md-typeset img.screenshot {
+  border-radius: 0.6rem;
+  box-shadow: 0 0.4rem 1.6rem rgb(0 0 0 / 18%);
+}
