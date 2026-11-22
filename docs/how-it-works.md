@@ -34,7 +34,8 @@ flowchart LR
   posted back with that token and a matching `Referer`. When the session expires, pages redirect to the
   login page. The client notices, logs in again (once, behind a lock) and retries.
 - **Files** download from `/member/download_file/<area>/<model>/<uuid>/` with a
-  `Content-Disposition` filename.
+  `Content-Disposition` filename. Some message attachments link straight to the media store instead,
+  at `/media/attachments/YY/MM/DD/<uuid>/<name>`; their name comes from the URL.
 
 ## Read-only, structurally
 

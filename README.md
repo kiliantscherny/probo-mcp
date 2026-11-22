@@ -30,9 +30,11 @@
 - **Messages, news, documents and info pages** as tools with structured output, plus `probo://` resources with argument completion.
 - **Search the whole document archive** by upload date or name, with progress updates, and read PDFs as text.
 - **An interactive ProBo browser** (an MCP App) right inside Claude Desktop.
+- **"What's new" that remembers**: new messages, news and documents are fetched in full and saved to a local archive, so the next time you ask you only get what has changed.
+- **A complete local archive**: `fetch_history` (or `probo-mcp --fetch-history`) saves all past news and the whole document archive as Markdown, PDFs and text.
 - **Prompts** for "what's new", summarising a document, and preparing for the general meeting.
 - **Read-only by construction**: an allowlist of routes is checked before every request, and the only thing ever submitted is the login form.
-- **1Password-friendly**: any setting can be an `op://` reference.
+- **Your password stays out of reach**: kept in the system keychain (`probo-mcp --set-password`; on macOS every read needs your approval) or 1Password, never in config files. The login only ever goes to a `*.probo.dk` site.
 - **One-click Claude Desktop extension** (`.mcpb`).
 
 ## Quick start

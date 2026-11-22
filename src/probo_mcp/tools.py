@@ -1,16 +1,18 @@
 """MCP tools. Every tool is read-only with respect to ProBo."""
 
 import logging
-from typing import Annotated
+from typing import Annotated, Literal
 
 from mcp.server.mcpserver import Context, Elicit, MCPServer, Resolve
 from mcp.types import CallToolResult, ResourceLink, TextContent, ToolAnnotations
 from pydantic import BaseModel, Field, create_model
 
+from . import archive
 from .models import (
     DocumentFolder,
     DocumentSearchResult,
     DocumentText,
+    HistoryResult,
     InfoPage,
     InfoPageLink,
     MessageSummary,
@@ -20,6 +22,7 @@ from .models import (
     Overview,
     RecentDocument,
     SavedFile,
+    WhatsNew,
 )
 from .service import DocumentOrder, MessageFolder
 from .state import service_from, user_errors
@@ -48,6 +51,54 @@ def _document_link(doc_id: str, name: str) -> ResourceLink:
 async def get_overview(ctx: Context, limit: Annotated[int, Field(ge=1, le=50)] = 5) -> Overview:
     """What's new: the latest inbox messages, news posts and recently added documents."""
     return await service_from(ctx).overview(limit)
+
+
+@user_errors
+async def whats_new(
+    ctx: Context,
+    max_items: Annotated[
+        int, Field(ge=1, le=50, description="Fetch at most this many new items; call again for the rest.")
+    ] = 15,
+    repeat_last: Annotated[
+        bool, Field(description="Return the previous result again, fetching nothing (e.g. if it got lost).")
+    ] = False,
+) -> WhatsNew:
+    """Everything new since the last call: messages, news and documents not yet in the local archive.
+
+    Use this for "what's new?". Each new item is fetched in full (thread or post, attachments, documents
+    with their text), saved to the local archive folder and remembered, so the next call returns only what
+    has appeared or changed since. A new reply or comment makes an item new again. "New" is tracked
+    locally, so something already read in the ProBo app is still new here. Opening a thread may mark it as
+    read in ProBo. Items count as seen once saved; if a result never arrived, use repeat_last=True.
+    """
+
+    async def progress(done: int, total: int, message: str) -> None:
+        await ctx.report_progress(done, total, message)
+
+    return await archive.whats_new(service_from(ctx), max_items=max_items, repeat_last=repeat_last, progress=progress)
+
+
+@user_errors
+async def fetch_history(
+    ctx: Context,
+    sections: Annotated[
+        list[Literal["news", "document", "message"]],
+        Field(description="What to fill in: all past news posts, the whole document archive, older messages."),
+    ] = ["news", "document"],  # noqa: B006 - never mutated; a list keeps the JSON schema simple
+    max_items: Annotated[int, Field(ge=1, le=200, description="Save at most this many; call again for the rest.")] = 50,
+) -> HistoryResult:
+    """Save older items to the local archive: all past news, every archive document, optionally older messages.
+
+    Use this when asked to download, archive or back up past news, documents or messages, not for "what's new".
+    Items are only saved (returned as a short list, not their content), and never reported by whats_new.
+    Large archives take several calls: repeat until `remaining` is 0. Read saved items with read_document
+    or from the files in `saved_to`.
+    """
+
+    async def progress(done: int, total: int, message: str) -> None:
+        await ctx.report_progress(done, total, message)
+
+    return await archive.fetch_history(service_from(ctx), sections=sections, max_items=max_items, progress=progress)
 
 
 # -- messages ------------------------------------------------------------------
@@ -239,3 +290,12 @@ def register(mcp: MCPServer) -> None:
             read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True
         ),
     )
+    # Write to the local archive and remember what they saved, so a second call does less.
+    for fn, title in ((whats_new, "What's new since last time"), (fetch_history, "Save older items to the archive")):
+        mcp.add_tool(
+            fn,
+            title=title,
+            annotations=ToolAnnotations(
+                read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True
+            ),
+        )

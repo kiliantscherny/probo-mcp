@@ -20,6 +20,10 @@ FILE_ID = "44444444-5555-6666-7777-888888888888"
 SUBFOLDER_ID = "66666666-7777-8888-9999-000000000000"
 SUBFOLDER_FILE_ID = "abababab-cdcd-efef-0101-232323232323"
 PAGE_ID = "77777777-8888-9999-aaaa-bbbbbbbbbbbb"
+OTHER_MESSAGE_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+OTHER_NEWS_ID = "33333333-4444-5555-6666-777777777777"
+MESSAGE_ATTACHMENT = "/member/download_file/message/Attachment/99999999-8888-7777-6666-555555555555/"
+NEWS_ATTACHMENT = "/member/download_file/news/Attachment/99999999-aaaa-bbbb-cccc-eeeeeeeeeeee/"
 LOGIN_HTML = '<form><input type="hidden" name="csrfmiddlewaretoken" value="tok"></form>'
 
 
@@ -75,6 +79,14 @@ def probo_site() -> Iterator[respx.Router]:
             path = f"/member/download_file/document_archive/Member/{doc_id}/"
             site.get(path).respond(200, content=PDF, headers=pdf_headers())
             site.head(path).respond(200, headers={**pdf_headers(), "content-length": str(len(PDF))})
+        # The second message and news post reuse the same page; whats_new tests need every row to open.
+        site.get(f"/member/communication/message/{OTHER_MESSAGE_ID}/change/").respond(
+            200, html=load("message_thread.html")
+        )
+        site.get(f"/member/communication/news/{OTHER_NEWS_ID}/view/").respond(200, html=load("news_view.html"))
+        for path in (MESSAGE_ATTACHMENT, NEWS_ATTACHMENT):
+            site.get(path).respond(200, content=PDF, headers=pdf_headers("Bilag.pdf"))
+            site.head(path).respond(200, headers={**pdf_headers("Bilag.pdf"), "content-length": str(len(PDF))})
         site.route(host="example.probo.dk").respond(404)  # anything else
         yield site
 
@@ -86,6 +98,7 @@ def settings(tmp_path: Path) -> Settings:
         username="resident@example.com",
         password="secret",
         download_dir=tmp_path / "downloads",
+        archive_dir=tmp_path / "archive",
         cache_seconds=0,
         confirm_download_mb=10,
     )

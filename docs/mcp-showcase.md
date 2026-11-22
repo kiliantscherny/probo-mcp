@@ -41,8 +41,9 @@ async def find_documents(...) -> Annotated[CallToolResult, DocumentSearchResult]
 ## Tool annotations and titles
 
 Every tool has a human `title` and `ToolAnnotations`: `read_only_hint`, `destructive_hint=False`,
-`idempotent_hint` and `open_world_hint`. `download_document` is the only tool that isn't read-only,
-because it writes a local file. Clients use these hints when deciding what to ask permission for.
+`idempotent_hint` and `open_world_hint`. `download_document`, `whats_new` and `fetch_history` are the only
+tools that aren't read-only, because they write local files. The last two aren't idempotent either:
+a second call does less, because the first one already saved its items. Clients use these hints when deciding what to ask permission for.
 
 ## Lifespan and shared state
 

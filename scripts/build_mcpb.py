@@ -42,6 +42,7 @@ def manifest(tools: list[dict], prompts: list[dict]) -> dict:
         "PROBO_USERNAME": "${user_config.username}",
         "PROBO_PASSWORD": "${user_config.password}",
         "PROBO_DOWNLOAD_DIR": "${user_config.download_dir}",
+        "PROBO_ARCHIVE_DIR": "${user_config.archive_dir}",
     }
     return {
         "manifest_version": "0.4",
@@ -53,8 +54,8 @@ def manifest(tools: list[dict], prompts: list[dict]) -> dict:
             "Unofficial, read-only connector for EG ProBo (probo.dk), the portal used by Danish owners' "
             "associations and housing co-ops. Ask Claude what's new, summarise documents and meeting "
             "papers, search the document archive, or open an interactive ProBo browser in the chat. "
-            "Nothing can be sent, changed or deleted in ProBo. The password can be a 1Password "
-            "reference (op://vault/item/password) if the 1Password CLI is installed."
+            "Nothing can be sent, changed or deleted in ProBo. Keep the password in the system keychain "
+            "(run `probo-mcp --set-password` once) or 1Password (an op:// reference), not in these settings."
         ),
         "author": {"name": "Kilian Tscherny", "url": REPO},
         "repository": {"type": "git", "url": REPO},
@@ -95,16 +96,27 @@ def manifest(tools: list[dict], prompts: list[dict]) -> dict:
             },
             "password": {
                 "type": "string",
-                "title": "Password",
-                "description": "Stored in your system keychain. You can also enter a 1Password op:// reference.",
+                "title": "Password (optional)",
+                "description": (
+                    "Best left empty: save it with `probo-mcp --set-password` instead, so only you can approve "
+                    "reading it. Or a 1Password op:// reference. A password typed here is passed to the server "
+                    "in its environment, where other programs running as you can read it."
+                ),
                 "sensitive": True,
-                "required": True,
+                "required": False,
             },
             "download_dir": {
                 "type": "directory",
                 "title": "Download folder",
                 "description": "Where download_document saves files.",
                 "default": "${HOME}/Downloads/probo",
+                "required": False,
+            },
+            "archive_dir": {
+                "type": "directory",
+                "title": "Archive folder",
+                "description": "Where whats_new saves messages, news and documents, and remembers what it has seen.",
+                "default": "${HOME}/Documents/probo",
                 "required": False,
             },
         },

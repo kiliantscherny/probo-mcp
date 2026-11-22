@@ -167,3 +167,59 @@ class Overview(BaseModel):
     messages: list[MessageSummary]
     news: list[NewsSummary]
     recent_documents: list[RecentDocument]
+
+
+class SavedAttachment(BaseModel):
+    """An attachment that whats_new saved to the local archive."""
+
+    name: str
+    path: str = Field(description="ProBo path; pass to read_document for the full text.")
+    saved_to: str = Field(default="", description="Local file, or empty when it was skipped.")
+    text_excerpt: str = Field(default="", description="Start of the extracted text (full text is saved as .txt).")
+    note: str = ""
+
+
+class NewItem(BaseModel):
+    """A message thread, news post or document the local archive had not seen yet."""
+
+    kind: Literal["message", "news", "document"]
+    id: str
+    title: str
+    date_text: str = ""
+    date: datetime | None = None
+    updated: bool = Field(description="Archived before but changed since, e.g. a new reply or comment.")
+    url: str = ""
+    saved_to: str = Field(description="Local folder (messages, news) or file (documents) holding the full content.")
+    content_markdown: str = Field(description="The thread or post as Markdown; for documents, the start of the text.")
+    attachments: list[SavedAttachment] = []
+
+
+class WhatsNew(BaseModel):
+    """Result of whats_new."""
+
+    items: list[NewItem]
+    archive_dir: str
+    first_run: bool = Field(description="True when the archive was empty, so only recent items count as new.")
+    remaining: int = Field(description="New items not fetched yet because of max_items; call again to get them.")
+    errors: list[str] = Field(default=[], description="Items that failed; they stay new and are retried next time.")
+    note: str = ""
+
+
+class HistoryEntry(BaseModel):
+    """An older item fetch_history saved to the local archive."""
+
+    kind: Literal["message", "news", "document"]
+    id: str
+    title: str
+    date_text: str = ""
+    saved_to: str
+
+
+class HistoryResult(BaseModel):
+    """Result of fetch_history."""
+
+    saved: list[HistoryEntry]
+    archive_dir: str
+    remaining: int = Field(description="Older items still to save; call again until this is 0.")
+    errors: list[str] = Field(default=[], description="Items that failed; they are retried next time.")
+    note: str = ""

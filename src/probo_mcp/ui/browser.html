@@ -85,7 +85,9 @@ function inline(s) {
   return esc(s)
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
     .replace(/(^|[^*])\*(?!\s)(.+?)\*/g, "$1<em>$2</em>")
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (_, t, u) => `<a href="${u}" data-link="${u}">${t}</a>`);
+    // Only ProBo links are clickable; links to other sites (written by residents) show their address instead.
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (_, t, u) =>
+      isProbo(u) ? `<a href="${u}" data-link="${u}">${t}</a>` : `${t} (${u})`);
 }
 function markdown(md) {
   const out = [];
@@ -125,6 +127,7 @@ function actions(...buttons) {
   }
   return div;
 }
+const isProbo = (url) => { try { const u = new URL(url); return u.protocol === "https:" && u.hostname.endsWith(".probo.dk"); } catch { return false; } };
 const openInProbo = (url) => () => app.openLink({ url });
 // Messages sent "as the user" carry only opaque ids, never ProBo text: subjects and file names are written
 // by other people, so the model must fetch them through tools (where they are clearly tool output).
@@ -212,7 +215,7 @@ function show(view) {
   guarded(listEl, views[view]);
 }
 $("#tabs").addEventListener("click", (e) => { const v = e.target.closest("button")?.dataset.view; if (v) show(v); });
-detailEl.addEventListener("click", (e) => { const a = e.target.closest("a[data-link]"); if (a) { e.preventDefault(); app.openLink({ url: a.dataset.link }); } });
+detailEl.addEventListener("click", (e) => { const a = e.target.closest("a[data-link]"); if (a) { e.preventDefault(); if (isProbo(a.dataset.link)) app.openLink({ url: a.dataset.link }); } });
 
 // -- host wiring ----------------------------------------------------------------------
 function applyHostContext(ctx) {

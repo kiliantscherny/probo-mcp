@@ -78,3 +78,24 @@ def test_info_pages():
     page = parsers.parse_info_page(html, "77777777-8888-9999-aaaa-bbbbbbbbbbbb")
     assert "No grilling on balconies." in page.content_markdown
     assert page.attachments[0].name == "rules.pdf"
+
+
+def _cf(email: str, key: int = 0x42) -> str:
+    return f"{key:02x}" + "".join(f"{ord(c) ^ key:02x}" for c in email)
+
+
+def test_cloudflare_obfuscated_emails_are_revealed():
+    from selectolax.lexbor import LexborHTMLParser
+
+    from probo_mcp.parsers import html_to_markdown
+
+    board, admin = _cf("board@example.dk"), _cf("admin@example.dk", key=0x17)
+    html = (
+        f'<div><p>Mail <a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="{board}">'
+        f'[email&#160;protected]</a> or <a href="/cdn-cgi/l/email-protection#{admin}">'
+        f'<span class="__cf_email__" data-cfemail="{admin}">[email protected]</span></a>, '
+        f'<span class="__cf_email__" data-cfemail="{board}">[email protected]</span>, '
+        '<a href="/cdn-cgi/l/email-protection#zz">[email protected]</a>.</p></div>'
+    )
+    md = html_to_markdown(LexborHTMLParser(html).css_first("div"))
+    assert md == "Mail board@example.dk or admin@example.dk, board@example.dk, [email protected]."

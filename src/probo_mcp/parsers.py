@@ -8,8 +8,9 @@ and ``.document-item__link`` rows in the document archive.
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 from markdownify import markdownify
 from selectolax.lexbor import LexborHTMLParser, LexborNode
@@ -29,6 +30,12 @@ from .models import (
     RecentDocument,
 )
 
+#: ProBo shows Danish local time. Dates carry this zone so they serialise as RFC 3339 with an offset,
+#: which the published ``format: date-time`` output schemas require.
+PROBO_TZ = ZoneInfo("Europe/Copenhagen")
+#: Sort key for items without a date (sorts last when newest-first).
+OLDEST = datetime.min.replace(tzinfo=UTC)
+
 _UUID_IN = re.compile(UUID)
 _DOWNLOAD_HINT = re.compile(r"/(download_file|download_file_landing|media)/")
 
@@ -47,10 +54,50 @@ def parse_probo_date(text: str) -> datetime | None:
     ProBo mixes formats depending on page and UI language, e.g.:
         "14 Oct 2026 - 18:22", "30 Sept 2026 · 19:15", "15 Okt 2026",
         "13 Maj 2026", "14.10.2026", "13. oktober 2026 12:01"
-    Return a naive datetime (midnight when there is no time), or None when the
-    text can't be parsed. Never raise: callers always keep the raw text too.
+    Return a datetime in Danish local time (`PROBO_TZ`; midnight when there is no
+    time), or None when the text can't be parsed. Never raise: callers always keep the raw text too.
     """
-    # TODO(you): implement - see tests/test_dates.py for the expected results.
+    text = text.strip().casefold()
+    if m := _NUMERIC_DATE.fullmatch(text):
+        day, month, year = int(m["day"]), int(m["month"]), int(m["year"])
+    elif m := _WORD_DATE.fullmatch(text):
+        month = _month_number(m["month"])
+        if month is None:
+            return None
+        day, year = int(m["day"]), int(m["year"])
+    else:
+        return None
+    try:
+        return datetime(year, month, day, int(m["hour"] or 0), int(m["minute"] or 0), tzinfo=PROBO_TZ)
+    except ValueError:  # e.g. 31.02.2026
+        return None
+
+
+# English and Danish month names; any prefix of three or more letters matches ("Okt", "Sept", "Maj").
+_MONTHS = (
+    ("january", "januar"),
+    ("february", "februar"),
+    ("march", "marts"),
+    ("april",),
+    ("may", "maj"),
+    ("june", "juni"),
+    ("july", "juli"),
+    ("august",),
+    ("september",),
+    ("october", "oktober"),
+    ("november",),
+    ("december",),
+)
+# Optional time after a separator: " - 18:22", " · 19:15", " 12:01", " kl. 17.00".
+_TIME = r"(?:\s*[-·,]?\s*(?:kl\.?\s*)?(?P<hour>\d{1,2})[:.](?P<minute>\d{2}))?"
+_NUMERIC_DATE = re.compile(rf"(?P<day>\d{{1,2}})\.(?P<month>\d{{1,2}})\.(?P<year>\d{{4}}){_TIME}")
+_WORD_DATE = re.compile(rf"(?P<day>\d{{1,2}})\.?\s+(?P<month>[a-zæøå]{{3,}})\.?\s+(?P<year>\d{{4}}){_TIME}")
+
+
+def _month_number(word: str) -> int | None:
+    for number, names in enumerate(_MONTHS, 1):
+        if any(name.startswith(word) for name in names):
+            return number
     return None
 
 
@@ -72,10 +119,37 @@ def _path(href: str) -> str:
     return urlparse(href).path
 
 
+def _decode_cf_email(hex_string: str) -> str:
+    """Decode Cloudflare's obfuscated address: hex bytes, the first being an XOR key for the rest."""
+    try:
+        data = bytes.fromhex(hex_string)
+    except ValueError:
+        return ""
+    if len(data) < 2:
+        return ""
+    return bytes(b ^ data[0] for b in data[1:]).decode("utf-8", errors="replace")
+
+
+def _reveal_emails(node: LexborNode) -> None:
+    """Replace Cloudflare's "[email protected]" placeholders with the real addresses, as plain text."""
+    for link in node.css("a[href*='/cdn-cgi/l/email-protection']"):
+        inner = link.css_first("[data-cfemail]")
+        encoded = (
+            (link.attributes.get("href") or "").partition("#")[2]
+            or link.attributes.get("data-cfemail")
+            or (inner.attributes.get("data-cfemail") if inner else None)
+            or ""
+        )
+        link.replace_with(_decode_cf_email(encoded) or _text(link))
+    for element in node.css("[data-cfemail]"):
+        element.replace_with(_decode_cf_email(element.attributes.get("data-cfemail") or "") or _text(element))
+
+
 def html_to_markdown(node: LexborNode | None) -> str:
     """Convert a node to Markdown, dropping page chrome (buttons, forms, toolbars...)."""
     if node is None:
         return ""
+    _reveal_emails(node)
     for junk in node.css(_NOISE):
         junk.decompose()
     md = markdownify(node.html or "", heading_style="ATX", strip=["img"])

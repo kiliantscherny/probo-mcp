@@ -8,22 +8,23 @@ from pydantic import Field
 Language = Annotated[str, Field(description="Language for the answer (ProBo content is usually Danish).")]
 
 
-def whats_new(
-    days: Annotated[str, Field(description="How many days back to look.")] = "7",
-    language: Language = "English",
-) -> str:
-    """Summarise what happened in the association recently."""
-    return f"""Give me a briefing on what's new in my owners' association on ProBo from the last {days} days.
+def whats_new(language: Language = "English") -> str:
+    """Brief me on everything new in the association since I last asked."""
+    return f"""Give me a briefing on what's new in my owners' association on ProBo since I last asked.
 
-1. Call get_overview, then list_messages and list_news if you need more than the first few items.
-2. Call find_documents with added_within_days={days} to catch every newly uploaded document, \
-not just the handful in recent_documents.
-3. Open anything that looks important (get_message, get_news, read_document).
+1. Call whats_new. It returns every message, news post and document not yet in my local archive, \
+already fetched in full with attachment text, and remembers them. If `remaining` is above 0, call it \
+again until it is 0.
+2. If an item's text is cut short and it matters, read the rest with read_document (attachment `path`), \
+or from the file in `saved_to`.
 
 Answer in {language}. Group the briefing into: decisions or votes coming up (with dates and deadlines), \
 money (costs, budgets, loans: what it means for an individual owner), practical disruptions \
-(water, heating, building work, access), and everything else. Quote amounts and dates exactly, \
-say which document or message each point comes from, and flag anything I need to act on."""
+(water, heating, building work, access), and everything else. Mark items that are updates (a new reply \
+or comment) as such. ProBo also sends notification messages announcing a news post or new documents \
+("Nyhed tilføjet", "Nyt dokument"): when the post or document itself is in the results, mention it once. \
+Quote amounts and dates exactly, say which document or message each point comes \
+from, and flag anything I need to act on. If nothing is new, just say so."""
 
 
 def summarize_document(

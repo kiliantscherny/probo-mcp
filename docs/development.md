@@ -43,8 +43,8 @@ including the login flow and a generated PDF, so no test touches the network.
 ### Testing against a real site
 
 ```sh
-cp .env.example .env    # your site and op:// references
-op run --env-file .env -- npx @modelcontextprotocol/inspector uv run probo-mcp
+cp .env.example .env    # your site and username; the password in the keychain or as an op:// reference
+npx @modelcontextprotocol/inspector uv run --env-file .env probo-mcp
 ```
 
 ### Testing the UI
@@ -53,7 +53,7 @@ Run the server over HTTP and open it in the MCP Apps reference host
 ([`basic-host`](https://github.com/modelcontextprotocol/ext-apps/tree/main/examples/basic-host)):
 
 ```sh
-op run --env-file .env -- uv run probo-mcp --transport streamable-http --port 3001
+uv run --env-file .env probo-mcp --transport streamable-http --port 3001
 # in a checkout of modelcontextprotocol/ext-apps:
 cd examples/basic-host && npm install && npm run build && npx tsx serve.ts
 # open http://localhost:8080 and call open_probo_browser

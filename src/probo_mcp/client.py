@@ -40,7 +40,15 @@ ALLOWED_PAGES = [
         rf"^/member/communities/page/{UUID}/view/$",
     )
 ]
-ALLOWED_DOWNLOADS = [re.compile(rf"^/member/download_file/\w+/\w+/{UUID}/$")]
+# Percent-encoded file name of a stored attachment; encoded '.', '/' and '\' are refused so the
+# name cannot smuggle in a path segment, and a name of only dots is refused outright.
+_MEDIA_NAME = r"(?!\.+$)(?:[\w.()\-]|%(?!2[eEfF]|5[cC])[0-9A-Fa-f]{2})+"
+ALLOWED_DOWNLOADS = [
+    # Only the areas attachments come from, not every download endpoint a link could name.
+    re.compile(rf"^/member/download_file/(?:document_archive|message|news|info_page)/\w+/{UUID}/$"),
+    # Attachments linked straight to the media store: /media/attachments/YY/MM/DD/<uuid>/<name>
+    re.compile(rf"^/media/attachments/\d{{2}}/\d{{2}}/\d{{2}}/{UUID}/{_MEDIA_NAME}$"),
+]
 
 
 class ProboError(RuntimeError):
@@ -49,6 +57,10 @@ class ProboError(RuntimeError):
 
 class NotAllowedError(ProboError):
     """Raised when a path is outside the read-only allowlist."""
+
+
+class FileTooLargeError(ProboError):
+    """Raised when a download is bigger than the configured limit (it is abandoned, not buffered)."""
 
 
 class LoginError(ProboError):
@@ -75,7 +87,7 @@ class FileInfo:
 
 def check_allowed(path: str, allowlist: list[re.Pattern[str]]) -> None:
     """Raise `NotAllowedError` unless ``path`` matches the allowlist."""
-    if not any(p.match(path) for p in allowlist):
+    if not any(p.fullmatch(path) for p in allowlist):
         raise NotAllowedError(f"Refusing to fetch {path!r}: not an allowlisted read-only ProBo route")
 
 
@@ -170,10 +182,16 @@ class ProboClient:
                     "next": "/member/",
                 },
                 headers={"Referer": self.web_url(LOGIN_PATH), "Origin": self.base_url},
+                # Never follow: a 307/308 redirect would re-send the form, password included, to its target.
+                follow_redirects=False,
             )
-            if resp.status_code >= 400 or self._is_login_page(resp):
+            target = httpx.URL(resp.headers.get("location", "")) if resp.is_redirect else None
+            if target is not None and target.host and target.host != self._http.base_url.host:
+                raise LoginError(f"ProBo's login redirected to another site ({target.host}); refusing to continue")
+            # Success is a redirect away from the login page; a 200 is the form again, with an error.
+            if target is None or target.path.startswith(LOGIN_PATH):
                 raise LoginError(
-                    "ProBo login failed. Check PROBO_USERNAME / PROBO_PASSWORD "
+                    "ProBo login failed. Check your username and password "
                     "(accounts requiring MitID or 2FA are not supported)."
                 )
             self._logged_in = True
@@ -222,15 +240,46 @@ class ProboClient:
             size_bytes=int(length) if length and length.isdigit() else None,
         )
 
-    async def download(self, path: str) -> DownloadedFile:
-        """GET an allowlisted download and return its bytes."""
+    async def download(self, path: str, *, max_bytes: int | None = None) -> DownloadedFile:
+        """GET an allowlisted download and return its bytes, giving up once it passes ``max_bytes``.
+
+        The body is streamed, so a huge file is abandoned rather than held in memory.
+        """
         check_allowed(path, ALLOWED_DOWNLOADS)
-        resp = await self._request("GET", path, None, None)
-        content_type = _content_type(resp)
-        if content_type == "text/html":
-            raise ProboError(f"Expected a file at {path} but got an HTML page")
-        filename = filename_from_disposition(resp.headers.get("content-disposition", ""), _last_segment(path))
-        return DownloadedFile(filename=filename, content_type=content_type, content=resp.content)
+        if not self._logged_in:
+            await self._login()
+        for attempt in (1, 2):
+            async with self._http.stream("GET", path) as resp:
+                if self._is_login_page(resp):  # session expired
+                    if attempt == 2:
+                        raise LoginError("Still redirected to login after re-authenticating")
+                    self._logged_in = False
+                    await self._login(force=True)
+                    continue
+                if resp.status_code == 404:
+                    raise ProboError(f"Not found: {path}")
+                resp.raise_for_status()
+                content_type = _content_type(resp)
+                if content_type == "text/html":
+                    raise ProboError(f"Expected a file at {path} but got an HTML page")
+                length = resp.headers.get("content-length", "")
+                if max_bytes is not None and length.isdigit() and int(length) > max_bytes:
+                    raise FileTooLargeError(_too_large(path, int(length), max_bytes))
+                chunks: list[bytes] = []
+                received = 0
+                async for chunk in resp.aiter_bytes():
+                    received += len(chunk)
+                    if max_bytes is not None and received > max_bytes:
+                        raise FileTooLargeError(_too_large(path, received, max_bytes))
+                    chunks.append(chunk)
+                disposition = resp.headers.get("content-disposition", "")
+                filename = filename_from_disposition(disposition, _last_segment(path))
+                return DownloadedFile(filename=filename, content_type=content_type, content=b"".join(chunks))
+        raise AssertionError("unreachable")  # pragma: no cover
+
+
+def _too_large(path: str, size: int, limit: int) -> str:
+    return f"{path} is over {limit / 1024 / 1024:.0f} MB ({size / 1024 / 1024:.0f} MB or more); not downloaded"
 
 
 def _content_type(resp: httpx.Response) -> str:
@@ -238,4 +287,4 @@ def _content_type(resp: httpx.Response) -> str:
 
 
 def _last_segment(path: str) -> str:
-    return path.rstrip("/").rsplit("/", 1)[-1]
+    return unquote(path.rstrip("/").rsplit("/", 1)[-1])

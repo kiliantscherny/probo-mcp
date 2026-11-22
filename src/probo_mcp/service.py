@@ -8,13 +8,19 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import re
+import subprocess
+import sys
+import tempfile
+import time
 from collections import deque
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
+import anyio
 import anyio.to_thread
 
 from . import parsers
@@ -35,6 +41,9 @@ from .models import (
     RecentDocument,
     SavedFile,
 )
+
+if TYPE_CHECKING:
+    from pypdf import PageObject  # imported lazily at run time: it is only needed for PDFs
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +88,7 @@ class ProboService:
         """Wrap a client; `settings` controls limits and the download directory."""
         self.client = client
         self.settings = settings
+        self.archive_lock = anyio.Lock()  # serialises whats_new runs (see archive.py)
 
     @classmethod
     def from_settings(cls, settings: Settings) -> ProboService:
@@ -163,7 +173,9 @@ class ProboService:
         now: datetime | None = None,
     ) -> DocumentSearchResult:
         """Walk the archive (breadth-first) and return files matching the filters, newest first."""
-        cutoff = (now or datetime.now()) - timedelta(days=added_within_days) if added_within_days else None
+        cutoff = (
+            (now or datetime.now(parsers.PROBO_TZ)) - timedelta(days=added_within_days) if added_within_days else None
+        )
         needle = (name_contains or "").casefold().strip()
         queue: deque[tuple[str | None, list[str]]] = deque([(folder_id, [])])
         visited: set[str | None] = set()
@@ -206,7 +218,7 @@ class ProboService:
                 label = "/".join(trail) or "archive root"
                 await progress(len(visited), len(visited) + len(queue), f"Scanned {label}")
 
-        found.sort(key=lambda d: d.added or datetime.min, reverse=True)
+        found.sort(key=lambda d: d.added or parsers.OLDEST, reverse=True)
         notes = []
         if queue:
             notes.append(f"Stopped after {max_folders} folders; narrow the search with folder_id.")
@@ -220,15 +232,16 @@ class ProboService:
         """Name, type and size of a document without downloading it."""
         return await self.client.file_info(download_path(document))
 
-    async def download(self, document: str) -> DownloadedFile:
-        """Download a document by id or attachment path."""
-        return await self.client.download(download_path(document))
+    async def download(self, document: str, *, max_mb: int | None = None) -> DownloadedFile:
+        """Download a document by id or attachment path, up to ``max_mb`` (and never over the global limit)."""
+        limit = min(max_mb, self.settings.max_download_mb) if max_mb is not None else self.settings.max_download_mb
+        return await self.client.download(download_path(document), max_bytes=limit * 1024 * 1024)
 
     async def read_document(self, document: str) -> DocumentText:
         """Extract the text of a PDF or plain-text document."""
         path = download_path(document)
-        f = await self.client.download(path)
-        text, note = extract_text(f)
+        f = await self.download(document)
+        text, note = await anyio.to_thread.run_sync(extract_text, f)  # PDF parsing is CPU-bound
         limit = self.settings.max_document_chars
         truncated = bool(text and len(text) > limit)
         if text and truncated:
@@ -251,7 +264,7 @@ class ProboService:
         target = (download_dir / safe_filename(filename or f.filename)).resolve()
         if target.parent != download_dir:  # defence in depth: safe_filename already removes separators
             raise ValueError(f"Refusing to write outside the download folder: {target}")
-        await anyio.to_thread.run_sync(_write_file, target, f.content)
+        await anyio.to_thread.run_sync(_write_file, target, f.content, True)
         logger.info("Saved %s (%d bytes)", target, len(f.content))
         return SavedFile(path=str(target), filename=target.name, size_bytes=len(f.content), content_type=f.content_type)
 
@@ -286,7 +299,7 @@ def extract_text(f: DownloadedFile) -> tuple[str | None, str]:
 
         try:
             reader = PdfReader(io.BytesIO(f.content))
-            text = "\n\n".join((p.extract_text() or "") for p in reader.pages).strip()
+            text = "\n\n".join(_page_text(p) for p in reader.pages).strip()
         except PdfReadError as e:
             return None, f"Could not read the PDF: {e}"
         if not text:
@@ -297,9 +310,68 @@ def extract_text(f: DownloadedFile) -> tuple[str | None, str]:
     return None, f"Text extraction is not supported for {f.content_type}. Use download_document to save the file."
 
 
-def _write_file(target: Path, content: bytes) -> None:
+def _page_text(page: PageObject) -> str:
+    """A page's text in reading order, with table columns kept on one line.
+
+    pypdf's layout mode follows the page's geometry, so text drawn word by word doesn't come out one
+    word per line, and table rows stay together. It pads columns with spaces; runs of them are
+    shortened to keep the text compact. Plain mode is the fallback if layout mode fails on a page.
+    """
+    plain = page.extract_text() or ""
+    try:
+        text = page.extract_text(extraction_mode="layout")
+    except Exception:  # layout mode is best effort; plain mode still gives the text
+        logger.debug("Layout extraction failed; using plain mode", exc_info=True)
+        return plain
+    lines = (_COLUMN_GAP.sub("   ", line).strip() for line in text.splitlines())
+    layout = _BLANK_LINES.sub("\n\n", "\n".join(lines)).strip()
+    # Layout mode drops rotated text (e.g. sideways table headers); then plain mode has more of the page.
+    if _letters(layout) < 0.95 * _letters(plain):
+        return plain
+    return layout
+
+
+def _letters(text: str) -> int:
+    return sum(1 for ch in text if not ch.isspace())
+
+
+# pypdf warns about rotated text in layout mode; _page_text handles that by falling back to plain mode.
+logging.getLogger("pypdf._text_extraction._layout_mode._fixed_width_page").setLevel(logging.ERROR)
+_COLUMN_GAP = re.compile(r" {3,}")
+_BLANK_LINES = re.compile(r"\n{3,}")
+
+
+def _write_file(target: Path, content: bytes, downloaded: bool = False) -> None:
+    """Write ``target`` atomically, via a temporary file renamed over it.
+
+    Renaming replaces a symlink planted at ``target`` instead of following it. Downloaded files get
+    the operating system's "from the internet" mark.
+    """
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(content)
+    fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=".probo-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(content)
+        if downloaded:
+            _mark_downloaded(Path(tmp))
+        Path(tmp).replace(target)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
+def _mark_downloaded(path: Path) -> None:
+    """Flag a file as downloaded, so the OS warns before opening it (it was written by other residents).
+
+    macOS: the ``com.apple.quarantine`` attribute, which makes Gatekeeper check apps, scripts and
+    ``.terminal`` files before they run. Windows: the ``Zone.Identifier`` stream ("from the internet").
+    """
+    if sys.platform == "darwin":
+        value = f"0081;{int(time.time()):08x};probo-mcp;"
+        subprocess.run(["/usr/bin/xattr", "-w", "com.apple.quarantine", value, str(path)], check=False)
+    elif sys.platform == "win32":
+        with Path(f"{path}:Zone.Identifier").open("w", encoding="ascii") as stream:
+            stream.write("[ZoneTransfer]\r\nZoneId=3\r\n")
 
 
 _WINDOWS_DEVICE_NAMES = re.compile(r"^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\.|$)", re.IGNORECASE)

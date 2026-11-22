@@ -15,6 +15,7 @@ def test_from_env_normalises_and_defaults() -> None:
     assert s.username == "me@example.com"
     assert s.password == "pw"
     assert s.download_dir == Path("~/Downloads/probo").expanduser()
+    assert s.archive_dir == Path("~/Documents/probo").expanduser()
     assert (s.max_document_chars, s.cache_seconds, s.confirm_download_mb) == (50_000, 60, 10)
 
 
@@ -23,23 +24,77 @@ def test_from_env_optional_overrides(tmp_path: Path) -> None:
         {
             **ENV,
             "PROBO_DOWNLOAD_DIR": str(tmp_path),
+            "PROBO_ARCHIVE_DIR": str(tmp_path / "archive"),
             "PROBO_MAX_DOCUMENT_CHARS": "100",
             "PROBO_CACHE_SECONDS": "0",
             "PROBO_CONFIRM_DOWNLOAD_MB": "5",
         }
     )
     assert (s.download_dir, s.max_document_chars, s.cache_seconds, s.confirm_download_mb) == (tmp_path, 100, 0, 5)
+    assert s.archive_dir == tmp_path / "archive"
 
 
 def test_missing_settings_are_listed() -> None:
-    with pytest.raises(ConfigError, match="PROBO_USERNAME, PROBO_PASSWORD"):
-        Settings.from_env({"PROBO_BASE_URL": "https://x.probo.dk", "PROBO_USERNAME": "  "})
+    with pytest.raises(ConfigError, match=r"setting\(s\): PROBO_BASE_URL, PROBO_USERNAME\."):
+        Settings.from_env({"PROBO_USERNAME": "  "})
 
 
-@pytest.mark.parametrize("url", ["http://example.probo.dk", "https://", "ftp://example.probo.dk"])
-def test_rejects_non_https_urls(url: str) -> None:
-    with pytest.raises(ConfigError, match="https URL"):
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://example.probo.dk",
+        "https://",
+        "ftp://example.probo.dk",
+        # The login may only ever go to a ProBo site.
+        "https://evil.example",
+        "https://probo.dk",
+        "https://evilprobo.dk",
+        "https://example.probo.dk.evil.example",
+        "https://example.probo.dk:8443",
+        "https://someone:pw@example.probo.dk",
+    ],
+)
+def test_rejects_anything_but_a_probo_site(url: str) -> None:
+    with pytest.raises(ConfigError, match=r"must be https://<association>\.probo\.dk"):
         Settings.from_env({**ENV, "PROBO_BASE_URL": url})
+
+
+def test_password_never_appears_in_repr() -> None:
+    s = Settings.from_env({**ENV, "PROBO_PASSWORD": "hunter2-secret"})
+    assert "hunter2-secret" not in repr(s)
+    assert "hunter2-secret" not in str(s)
+
+
+def test_plain_text_password_is_warned_about(caplog: pytest.LogCaptureFixture) -> None:
+    Settings.from_env(ENV)
+    assert "plain text" in caplog.text
+    assert "pw" not in caplog.text.replace("PROBO_PASSWORD", "").replace("probo-mcp --set-password", "")
+
+
+def test_password_from_the_keychain_when_not_in_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    from probo_mcp import credentials
+
+    asked = []
+
+    def fake_get(base_url: str, username: str) -> str | None:
+        asked.append((base_url, username))
+        return "from-keychain"
+
+    monkeypatch.setattr(credentials, "get_password", fake_get)
+    env = {k: v for k, v in ENV.items() if k != "PROBO_PASSWORD"}
+    assert Settings.from_env(env).password == "from-keychain"
+    assert asked == [("https://example.probo.dk", "me@example.com")]
+
+    monkeypatch.setattr(credentials, "get_password", lambda *a: None)
+    with pytest.raises(ConfigError, match="probo-mcp --set-password"):
+        Settings.from_env(env)
+
+    def refused(*a):
+        raise credentials.CredentialError("The keychain refused access (user canceled)")
+
+    monkeypatch.setattr(credentials, "get_password", refused)
+    with pytest.raises(ConfigError, match="refused access"):
+        Settings.from_env(env)
 
 
 def test_rejects_non_integer_limits() -> None:

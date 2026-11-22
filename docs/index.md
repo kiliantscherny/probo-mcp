@@ -72,15 +72,18 @@ Connect it to Claude Desktop, Claude Code or any MCP client, and ask things like
 
     1. Download `probo-mcp-<version>.mcpb` from the [latest release](https://github.com/kiliantscherny/probo-mcp/releases/latest).
     2. Double-click it (or drag it onto Claude Desktop) and click **Install**.
-    3. Enter your ProBo address (`https://<association>.probo.dk`), e-mail and password.
+    3. Enter your ProBo address (`https://<association>.probo.dk`) and e-mail. Leave the password empty
+       and save it with `probo-mcp --set-password` instead ([why](configuration.md#your-password)).
 
 === "Claude Code"
 
     ```sh
+    # once, in your own terminal: save the password in the system keychain
+    uvx --from git+https://github.com/kiliantscherny/probo-mcp probo-mcp --set-password
+
     claude mcp add probo -s user \
       -e PROBO_BASE_URL=https://<association>.probo.dk \
       -e PROBO_USERNAME=you@example.com \
-      -e PROBO_PASSWORD=op://Private/ProBo/password \
       -- uvx --from git+https://github.com/kiliantscherny/probo-mcp probo-mcp
     ```
 
@@ -94,13 +97,13 @@ Connect it to Claude Desktop, Claude Code or any MCP client, and ask things like
           "args": ["--from", "git+https://github.com/kiliantscherny/probo-mcp", "probo-mcp"],
           "env": {
             "PROBO_BASE_URL": "https://<association>.probo.dk",
-            "PROBO_USERNAME": "you@example.com",
-            "PROBO_PASSWORD": "..."
+            "PROBO_USERNAME": "you@example.com"
           }
         }
       }
     }
     ```
 
-Passwords can be [1Password references](configuration.md#1password) (`op://vault/item/password`), so
-the secret never has to sit in a config file.
+Keep the password out of config files: save it in the system keychain with
+`probo-mcp --set-password`, or use a [1Password reference](configuration.md#1password). See
+[Your password](configuration.md#your-password).

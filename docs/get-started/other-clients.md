@@ -15,28 +15,29 @@ Most clients accept this shape:
       "args": ["--from", "git+https://github.com/kiliantscherny/probo-mcp", "probo-mcp"],
       "env": {
         "PROBO_BASE_URL": "https://<association>.probo.dk",
-        "PROBO_USERNAME": "you@example.com",
-        "PROBO_PASSWORD": "op://Private/ProBo/password"
+        "PROBO_USERNAME": "you@example.com"
       }
     }
   }
 }
 ```
 
+The password isn't in it: save it once with `probo-mcp --set-password`, or add
+`"PROBO_PASSWORD": "op://Private/ProBo/password"` for 1Password. See [Your password](../configuration.md#your-password).
+
 ## Claude Desktop config file
 
 This is an alternative to the [extension](claude-desktop.md). Edit
 `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, or
 `%APPDATA%\Claude\claude_desktop_config.json` on Windows. Use the JSON above, or this version, which
-runs a local checkout through `op run`:
+runs a local checkout with its settings in an `.env` file (keychain or `op://` references, never the password):
 
 ```json
 {
   "mcpServers": {
     "probo": {
-      "command": "op",
-      "args": ["run", "--env-file", "/path/to/probo-mcp/.env", "--",
-               "uv", "--directory", "/path/to/probo-mcp", "run", "probo-mcp"]
+      "command": "uv",
+      "args": ["--directory", "/path/to/probo-mcp", "run", "--env-file", "/path/to/probo-mcp/.env", "probo-mcp"]
     }
   }
 }
@@ -64,5 +65,5 @@ Use the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) to ex
 resources, prompts and completions interactively:
 
 ```sh
-op run --env-file .env -- npx @modelcontextprotocol/inspector uv run probo-mcp
+npx @modelcontextprotocol/inspector uv run --env-file .env probo-mcp
 ```

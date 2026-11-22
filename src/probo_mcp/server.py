@@ -17,7 +17,13 @@ INSTRUCTIONS = """\
 Read-only access to an EG ProBo (probo.dk) owners'/residents' association portal: \
 messages, news, the document archive and information pages. Content is usually in Danish.
 
-- Start with get_overview for "what's new". Use list_* tools to find ids, then get_* / read_document.
+- For "what's new" (also "hvad er nyt", "nyt fra ejerforeningen/foreningen/bestyrelsen") call whats_new: \
+it returns everything not yet in the local archive, already fetched in full, and remembers it. If \
+`remaining` > 0, call it again. If a call failed after fetching, whats_new(repeat_last=true) returns that \
+result again. get_overview is a quick peek that remembers nothing.
+- To download or back up older items (all past news, the whole document archive) call fetch_history \
+until `remaining` is 0. It saves files and returns a short list, not their content.
+- Use list_* tools to find ids, then get_* / read_document.
 - For "documents added in the last N days" use find_documents(added_within_days=N): \
 recent_documents only shows a handful.
 - Attachment `path` values from get_message / get_news / get_info_page work with read_document.

@@ -14,7 +14,7 @@ The easiest way to use probo-mcp is as a Claude Desktop extension (an `.mcpb` bu
     |---|---|
     | **ProBo site** | Your association's address, e.g. `https://<association>.probo.dk` |
     | **Username** | The e-mail you log in with |
-    | **Password** | Your ProBo password. It is stored in the system keychain, not in a config file. |
+    | **Password** | Best left **empty**: run `probo-mcp --set-password` in a terminal instead (see [Your password](../configuration.md#your-password)). A password typed here is kept in the system keychain, but it is passed to the server in its environment, where other programs running as you can read it. |
     | **Download folder** | Where downloaded documents are saved (default `~/Downloads/probo`) |
 
 4. Make sure the extension is **enabled**, then start a new chat.

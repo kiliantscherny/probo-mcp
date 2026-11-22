@@ -51,6 +51,7 @@ async def test_server_info_and_catalogue(server: MCPServer) -> None:
         assert client.server_info.title == "ProBo"
         assert client.server_info.icons
         assert "find_documents" in (client.instructions or "")
+        assert "hvad er nyt" in (client.instructions or "")
         tools = {t.name: t for t in (await client.list_tools()).tools}
         templates = {t.uri_template for t in (await client.list_resource_templates()).resource_templates}
         prompts = {p.name for p in (await client.list_prompts()).prompts}
@@ -58,14 +59,19 @@ async def test_server_info_and_catalogue(server: MCPServer) -> None:
     assert set(tools) == {
         "open_probo_browser", "get_overview", "list_messages", "get_message", "list_news", "get_news",
         "list_documents", "recent_documents", "find_documents", "read_document", "download_document",
-        "list_info_pages", "get_info_page",
+        "list_info_pages", "get_info_page", "whats_new", "fetch_history",
     }  # fmt: skip
     for name, tool in tools.items():
         assert tool.title, name
         assert tool.annotations is not None
         assert tool.annotations.destructive_hint is False, name
         assert tool.output_schema, f"{name} should publish an output schema"
-        assert tool.annotations.read_only_hint is (name != "download_document"), name
+        assert tool.annotations.read_only_hint is (name not in {"download_document", "whats_new", "fetch_history"}), (
+            name
+        )
+    whats_new = tools["whats_new"].annotations
+    assert whats_new is not None
+    assert whats_new.idempotent_hint is False  # a second call returns less
     # Injected parameters never leak into the schema the model sees.
     assert set(tools["download_document"].input_schema["properties"]) == {"document"}
     assert "ctx" not in tools["get_overview"].input_schema["properties"]
@@ -336,12 +342,47 @@ async def test_completions_degrade_when_unconfigured(probo_site: respx.Router) -
 
 async def test_prompts(server: MCPServer) -> None:
     async with Client(server) as client:
-        whats_new = await client.get_prompt("whats_new", {"days": "14", "language": "Dansk"})
+        whats_new = await client.get_prompt("whats_new", {"language": "Dansk"})
         summary = await client.get_prompt("summarize_document", {"document_id": FILE_ID})
         meeting = await client.get_prompt("prepare_for_general_meeting", {})
     briefing = text(whats_new.messages[0])
-    assert "last 14 days" in briefing
-    assert "added_within_days=14" in briefing
+    assert "since I last asked" in briefing
+    assert "Call whats_new" in briefing
     assert "Answer in Dansk" in briefing
     assert f"probo://documents/{FILE_ID}" in text(summary.messages[0])
     assert "generalforsamling" in text(meeting.messages[0])
+
+
+async def test_every_tool_output_matches_its_schema(server: MCPServer, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Validate real outputs against the published schemas, with RFC 3339 date-times as strict as clients."""
+    from datetime import datetime
+
+    from jsonschema import Draft202012Validator, FormatChecker
+
+    from probo_mcp import archive
+
+    monkeypatch.setattr(archive, "FIRST_RUN_DAYS", 100_000)  # so whats_new returns dated items
+    checker = FormatChecker(formats=())
+
+    @checker.checks("date-time", raises=ValueError)
+    def rfc3339(value: object) -> bool:
+        return not isinstance(value, str) or datetime.fromisoformat(value).tzinfo is not None
+
+    calls = {
+        "open_probo_browser": {}, "get_overview": {}, "list_messages": {}, "get_message": {"message_id": MESSAGE_ID},
+        "list_news": {}, "get_news": {"news_id": NEWS_ID}, "list_documents": {}, "recent_documents": {},
+        "find_documents": {}, "read_document": {"document": FILE_ID}, "list_info_pages": {},
+        "get_info_page": {"page_id": PAGE_ID}, "whats_new": {}, "fetch_history": {},
+    }  # fmt: skip
+    async with Client(server) as client:
+        tools = {t.name: t for t in (await client.list_tools()).tools}
+        assert set(calls) == set(tools) - {"download_document"}  # needs an elicitation round trip
+        for name, args in calls.items():
+            result = await client.call_tool(name, args)
+            assert not result.is_error, (name, result.content)
+            schema = tools[name].output_schema
+            assert schema is not None
+            errors = [e.message for e in Draft202012Validator(schema, format_checker=checker).iter_errors(
+                result.structured_content
+            )]  # fmt: skip
+            assert errors == [], name
