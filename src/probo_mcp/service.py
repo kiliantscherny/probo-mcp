@@ -16,6 +16,7 @@ import tempfile
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -44,6 +45,7 @@ from .models import (
 
 if TYPE_CHECKING:
     from pypdf import PageObject  # imported lazily at run time: it is only needed for PDFs
+    from pypdfium2 import PdfPage
 
 logger = logging.getLogger(__name__)
 
@@ -239,6 +241,16 @@ class ProboService:
 
     async def read_document(self, document: str) -> DocumentText:
         """Extract the text of a PDF or plain-text document."""
+        doc, _ = await self.read_document_with_scans(document, start_page=None)
+        return doc
+
+    async def read_document_with_scans(
+        self, document: str, *, start_page: int | None = 1
+    ) -> tuple[DocumentText, list[PageImage]]:
+        """Like `read_document`, plus images of the PDF's scanned pages from ``start_page`` on.
+
+        ``start_page=None`` skips rendering (for callers that can only show text).
+        """
         path = download_path(document)
         f = await self.download(document)
         text, note = await anyio.to_thread.run_sync(extract_text, f)  # PDF parsing is CPU-bound
@@ -247,7 +259,7 @@ class ProboService:
         if text and truncated:
             text = text[:limit]
             note = (note + " " if note else "") + f"Truncated to {limit} characters."
-        return DocumentText(
+        doc = DocumentText(
             id=path,
             filename=f.filename,
             content_type=f.content_type,
@@ -256,6 +268,24 @@ class ProboService:
             truncated=truncated,
             note=note,
         )
+        if start_page is None or not is_pdf(f):
+            return doc, []
+        try:
+            images, scanned, page_count = await anyio.to_thread.run_sync(
+                lambda: render_scanned_pages(f.content, start_page=start_page)
+            )
+        except Exception:  # rendering is a bonus on top of the text; never fail the read over it
+            logger.warning("Could not render the pages of %s", f.filename, exc_info=True)
+            return doc, []
+        if not scanned:
+            return doc, []
+        update = {
+            "page_count": page_count,
+            "scanned_pages": scanned,
+            "page_images": [i.page for i in images],
+            "note": _scan_note(doc, images, scanned, page_count, start_page),
+        }
+        return doc.model_copy(update=update), images
 
     async def save_document(self, document: str, filename: str | None = None) -> SavedFile:
         """Download a document into the configured download directory."""
@@ -291,9 +321,17 @@ class ProboService:
         )
 
 
+SCAN_NOTE = "The PDF has no text layer (probably a scan). The read_document tool shows its pages as images."
+
+
+def is_pdf(f: DownloadedFile) -> bool:
+    """Whether a downloaded file is a PDF (by its type, or its name when the server sent a generic type)."""
+    return f.content_type == "application/pdf" or f.filename.lower().endswith(".pdf")
+
+
 def extract_text(f: DownloadedFile) -> tuple[str | None, str]:
     """Return ``(text, note)`` for a downloaded file."""
-    if f.content_type == "application/pdf" or f.filename.lower().endswith(".pdf"):
+    if is_pdf(f):
         from pypdf import PdfReader
         from pypdf.errors import PdfReadError
 
@@ -303,7 +341,7 @@ def extract_text(f: DownloadedFile) -> tuple[str | None, str]:
         except PdfReadError as e:
             return None, f"Could not read the PDF: {e}"
         if not text:
-            return None, "The PDF has no extractable text (probably scanned). Use download_document to get the file."
+            return None, SCAN_NOTE
         return text, ""
     if f.content_type.startswith("text/"):
         return f.content.decode("utf-8", errors="replace"), ""
@@ -333,6 +371,80 @@ def _page_text(page: PageObject) -> str:
 
 def _letters(text: str) -> int:
     return sum(1 for ch in text if not ch.isspace())
+
+
+#: Longest side of a rendered page in pixels: about the most a vision model reads at full detail.
+PAGE_IMAGE_PX = 1568
+#: Scanned pages returned per read_document call; each costs the model roughly 2,000 tokens.
+MAX_PAGE_IMAGES = 5
+
+
+@dataclass(frozen=True)
+class PageImage:
+    """One rendered PDF page."""
+
+    page: int  # 1-based
+    jpeg: bytes
+
+
+def render_scanned_pages(
+    content: bytes, *, start_page: int = 1, limit: int = MAX_PAGE_IMAGES
+) -> tuple[list[PageImage], list[int], int]:
+    """Render a PDF's scanned pages, from ``start_page`` on, as greyscale JPEGs.
+
+    A scanned page is one with an image and no text layer; blank pages and text pages are skipped.
+    Returns ``(images, every scanned page number, page count)``, with at most ``limit`` images.
+    """
+    import pypdfium2 as pdfium
+
+    pdf = pdfium.PdfDocument(content)
+    try:
+        scanned = [n for n in range(1, len(pdf) + 1) if _is_scan(pdf[n - 1])]
+        images = []
+        for n in [n for n in scanned if n >= start_page][:limit]:
+            page = pdf[n - 1]
+            bitmap = page.render(scale=PAGE_IMAGE_PX / max(page.get_size()), grayscale=True)
+            buf = io.BytesIO()
+            bitmap.to_pil().save(buf, "JPEG", quality=75, optimize=True)
+            images.append(PageImage(page=n, jpeg=buf.getvalue()))
+        return images, scanned, len(pdf)
+    finally:
+        pdf.close()
+
+
+def _is_scan(page: PdfPage) -> bool:
+    import pypdfium2.raw as pdfium_c
+
+    if page.get_textpage().get_text_bounded().strip():
+        return False
+    return next(page.get_objects(filter=[pdfium_c.FPDF_PAGEOBJ_IMAGE], max_depth=3), None) is not None
+
+
+def _scan_note(doc: DocumentText, images: list[PageImage], scanned: list[int], page_count: int, start: int) -> str:
+    """Explain which pages are attached as images and how to get the rest."""
+    shown = [i.page for i in images]
+    what = "The PDF is a scan with no text layer" if doc.text is None else "Some pages are scans with no text layer"
+    if shown:
+        note = f"{what}; page(s) {_page_ranges(shown)} of {page_count} are attached as images."
+    else:
+        note = f"{what} (page(s) {_page_ranges(scanned)}), none of them from page {start} on."
+    rest = [n for n in scanned if shown and n > shown[-1]]
+    if rest:
+        note += f" {len(rest)} more scanned page(s): call read_document again with start_page={rest[0]}."
+    # Keep earlier notes (e.g. truncation), but not the generic "probably a scan" one this replaces.
+    earlier = "" if doc.text is None else doc.note
+    return f"{earlier} {note}".strip()
+
+
+def _page_ranges(pages: list[int]) -> str:
+    """``[1, 2, 3, 5]`` -> ``"1-3, 5"``."""
+    ranges: list[list[int]] = []
+    for n in pages:
+        if ranges and n == ranges[-1][1] + 1:
+            ranges[-1][1] = n
+        else:
+            ranges.append([n, n])
+    return ", ".join(str(a) if a == b else f"{a}-{b}" for a, b in ranges)
 
 
 # pypdf warns about rotated text in layout mode; _page_text handles that by falling back to plain mode.

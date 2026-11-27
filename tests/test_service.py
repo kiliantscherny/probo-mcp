@@ -1,3 +1,4 @@
+import io
 import sys
 from dataclasses import replace
 from datetime import datetime
@@ -10,9 +11,16 @@ from probo_mcp import parsers
 from probo_mcp.client import DownloadedFile
 from probo_mcp.config import Settings
 from probo_mcp.parsers import PROBO_TZ
-from probo_mcp.service import ProboService, extract_text, safe_filename
+from probo_mcp.service import (
+    PAGE_IMAGE_PX,
+    ProboService,
+    _page_ranges,
+    extract_text,
+    render_scanned_pages,
+    safe_filename,
+)
 
-from .conftest import FILE_ID, PDF, SUBFOLDER_FILE_ID
+from .conftest import FILE_ID, PDF, SUBFOLDER_FILE_ID, make_mixed_pdf
 
 
 @pytest.fixture
@@ -93,7 +101,7 @@ def test_extract_text_scanned_pdf() -> None:
 
     text, note = extract_text(DownloadedFile("scan.pdf", "application/pdf", make_pdf("")))
     assert text is None
-    assert "no extractable text" in note
+    assert "no text layer" in note
 
 
 @pytest.mark.parametrize(
@@ -171,3 +179,78 @@ def test_pdf_text_falls_back_to_plain_when_layout_loses_text() -> None:
             return "Header" if extraction_mode == "layout" else "Header Sideways column titles"
 
     assert _page_text(Rotated()) == "Header Sideways column titles"  # ty: ignore[invalid-argument-type]
+
+
+# -- scanned PDFs ------------------------------------------------------------------
+
+
+def test_render_scanned_pages_finds_only_scans() -> None:
+    images, scanned, page_count = render_scanned_pages(make_mixed_pdf("TSBS"))
+    assert (scanned, page_count) == ([2, 4], 4)  # the text page and the blank page are not scans
+    assert [i.page for i in images] == [2, 4]
+    from PIL import Image
+
+    picture = Image.open(io.BytesIO(images[0].jpeg))
+    assert (picture.format, picture.mode) == ("JPEG", "L")
+    assert max(picture.size) == PAGE_IMAGE_PX
+
+
+def test_render_scanned_pages_pages_through() -> None:
+    images, scanned, _ = render_scanned_pages(make_mixed_pdf("S" * 8), start_page=4, limit=3)
+    assert scanned == list(range(1, 9))
+    assert [i.page for i in images] == [4, 5, 6]
+
+
+def scanned_document(probo_site: respx.Router, content: bytes) -> None:
+    probo_site.get(f"/member/download_file/document_archive/Member/{FILE_ID}/").respond(
+        200, content=content, headers={"content-type": "application/pdf"}
+    )
+
+
+async def test_read_document_attaches_a_scan_in_batches(service: ProboService, probo_site: respx.Router) -> None:
+    scanned_document(probo_site, make_mixed_pdf("S" * 7))
+    doc, images = await service.read_document_with_scans(FILE_ID)
+    assert doc.text is None
+    assert (doc.page_count, doc.scanned_pages, doc.page_images) == (7, list(range(1, 8)), [1, 2, 3, 4, 5])
+    assert [i.page for i in images] == [1, 2, 3, 4, 5]
+    assert doc.note == (
+        "The PDF is a scan with no text layer; page(s) 1-5 of 7 are attached as images. "
+        "2 more scanned page(s): call read_document again with start_page=6."
+    )
+    doc, images = await service.read_document_with_scans(FILE_ID, start_page=6)
+    assert doc.page_images == [6, 7]
+    assert "more scanned" not in doc.note
+
+
+async def test_read_document_keeps_text_and_adds_scanned_pages(service: ProboService, probo_site: respx.Router) -> None:
+    scanned_document(probo_site, make_mixed_pdf("TTS"))
+    doc, images = await service.read_document_with_scans(FILE_ID)
+    assert doc.text
+    assert "A page with real text" in doc.text
+    assert [i.page for i in images] == [3]
+    assert doc.note == "Some pages are scans with no text layer; page(s) 3 of 3 are attached as images."
+
+
+async def test_read_document_without_scans_attaches_nothing(service: ProboService, probo_site: respx.Router) -> None:
+    doc, images = await service.read_document_with_scans(FILE_ID)
+    assert images == []
+    assert (doc.page_count, doc.scanned_pages, doc.note) == (None, [], "")
+
+
+async def test_plain_read_document_does_not_render(service: ProboService, probo_site: respx.Router) -> None:
+    scanned_document(probo_site, make_mixed_pdf("S"))
+    doc = await service.read_document(FILE_ID)
+    assert doc.text is None
+    assert doc.page_images == []
+    assert "shows its pages as images" in doc.note
+
+
+async def test_unrenderable_pdf_still_reads(service: ProboService, probo_site: respx.Router) -> None:
+    scanned_document(probo_site, b"%PDF-1.4 not really a PDF")
+    doc, images = await service.read_document_with_scans(FILE_ID)
+    assert images == []
+    assert doc.text is None
+
+
+def test_page_ranges() -> None:
+    assert _page_ranges([1, 2, 3, 5, 7, 8]) == "1-3, 5, 7-8"

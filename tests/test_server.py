@@ -1,5 +1,7 @@
 """End-to-end tests through a real in-process MCP client, on both protocol eras."""
 
+import base64
+import json
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -12,6 +14,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.types import (
     ElicitRequestParams,
     ElicitResult,
+    ImageContent,
     PromptMessage,
     PromptReference,
     ResourceTemplateReference,
@@ -23,7 +26,7 @@ from probo_mcp.config import ConfigError, Settings
 from probo_mcp.server import create_server
 from probo_mcp.ui import RESOURCE_URI
 
-from .conftest import BASE, FILE_ID, MESSAGE_ID, NEWS_ID, PAGE_ID, SUBFOLDER_FILE_ID
+from .conftest import BASE, FILE_ID, MESSAGE_ID, NEWS_ID, PAGE_ID, SUBFOLDER_FILE_ID, make_mixed_pdf
 
 
 def text(block: object) -> str:
@@ -163,6 +166,22 @@ async def test_read_document_extracts_pdf_text(server: MCPServer) -> None:
     assert doc is not None
     assert doc["filename"] == "Budget 2026.pdf"
     assert "Hello from the ProBo archive" in doc["text"]
+
+
+async def test_read_document_shows_scanned_pages_as_images(server: MCPServer, probo_site: respx.Router) -> None:
+    probo_site.get(f"/member/download_file/document_archive/Member/{FILE_ID}/").respond(
+        200, content=make_mixed_pdf("TS"), headers={"content-type": "application/pdf"}
+    )
+    result = await call(server, "read_document", {"document": FILE_ID})
+    assert not result.is_error
+    assert result.structured_content is not None
+    assert result.structured_content["page_images"] == [2]
+    data, label, image = result.content
+    assert json.loads(text(data)) == result.structured_content  # clients that only show content still get it
+    assert text(label) == "Page 2 of 2:"
+    assert isinstance(image, ImageContent)
+    assert image.mime_type == "image/jpeg"
+    assert base64.b64decode(image.data).startswith(b"\xff\xd8")  # a JPEG
 
 
 async def test_info_pages(server: MCPServer) -> None:

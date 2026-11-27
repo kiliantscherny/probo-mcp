@@ -149,6 +149,9 @@ class DocumentText(BaseModel):
     text: str | None
     truncated: bool = False
     note: str = ""
+    page_count: int | None = Field(default=None, description="Pages in the PDF, when it has scanned pages.")
+    scanned_pages: list[int] = Field(default_factory=list, description="Pages with no text layer (scans).")
+    page_images: list[int] = Field(default_factory=list, description="Scanned pages attached to this result as images.")
 
 
 class SavedFile(BaseModel):

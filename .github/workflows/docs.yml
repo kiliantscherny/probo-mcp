@@ -16,6 +16,8 @@ concurrency:
 
 jobs:
   deploy:
+    # GitHub Pages needs a public repository (or a paid plan); while private, CI still builds the docs.
+    if: github.event.repository.visibility == 'public'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

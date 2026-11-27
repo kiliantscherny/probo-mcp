@@ -11,23 +11,28 @@ def test_version(capsys: pytest.CaptureFixture[str]) -> None:
     assert capsys.readouterr().out.strip() == f"probo-mcp {__version__}"
 
 
-@pytest.mark.parametrize(
-    ("argv", "expected"),
-    [
-        ([], (("stdio",), {})),
-        (
-            ["--transport", "streamable-http", "--port", "9000"],
-            (("streamable-http",), {"host": "127.0.0.1", "port": 9000}),
-        ),
-    ],
-)
-def test_transports(monkeypatch: pytest.MonkeyPatch, argv: list[str], expected: tuple) -> None:
+def test_stdio_is_the_default(monkeypatch: pytest.MonkeyPatch) -> None:
     from probo_mcp import server
 
     calls = []
-    monkeypatch.setattr(server.mcp, "run", lambda *a, **kw: calls.append((a, kw)))
-    cli.main(argv)
-    assert calls == [expected]
+    monkeypatch.setattr(server.mcp, "run", lambda *a, **kw: calls.append(a))
+    cli.main([])
+    assert calls == [("stdio",)]
+
+
+@pytest.fixture
+def served(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, int, str | None]]:
+    """Calls to `_serve_http` as (host, port, token), instead of starting a server."""
+    calls: list[tuple[str, int, str | None]] = []
+    monkeypatch.setattr(cli, "_serve_http", lambda host, port, token: calls.append((host, port, token)))
+    monkeypatch.delenv("PROBO_HTTP_TOKEN", raising=False)
+    return calls
+
+
+def test_http_on_loopback_needs_no_token(served: list) -> None:
+    cli.main(["--transport", "streamable-http", "--port", "9000"])
+    cli.main(["--transport", "streamable-http", "--host", "::1"])
+    assert served == [("127.0.0.1", 9000, None), ("::1", 8000, None)]
 
 
 def test_fetch_history_runs_until_done(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -103,20 +108,34 @@ def test_set_password_refuses_other_sites(monkeypatch: pytest.MonkeyPatch, capsy
 
 
 @pytest.mark.parametrize("host", ["0.0.0.0", "192.168.1.10", "::", "example.com"])
-def test_http_refuses_non_loopback_hosts(host: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    from probo_mcp import server
-
-    monkeypatch.setattr(server.mcp, "run", lambda *a, **kw: pytest.fail("should not start"))
+def test_http_refuses_non_loopback_hosts(host: str, served: list) -> None:
     with pytest.raises(SystemExit) as exit_info:
         cli.main(["--transport", "streamable-http", "--host", host])
     assert exit_info.value.code == 2
+    assert served == []
 
 
-def test_http_allows_remote_hosts_when_asked(monkeypatch: pytest.MonkeyPatch) -> None:
-    from probo_mcp import server
-
-    calls = []
-    monkeypatch.setattr(server.mcp, "run", lambda *a, **kw: calls.append(kw))
+def test_remote_http_gets_a_random_token(served: list, capsys: pytest.CaptureFixture[str]) -> None:
     cli.main(["--transport", "streamable-http", "--host", "0.0.0.0", "--allow-remote"])
-    cli.main(["--transport", "streamable-http", "--host", "::1"])
-    assert [c["host"] for c in calls] == ["0.0.0.0", "::1"]
+    cli.main(["--transport", "streamable-http", "--host", "0.0.0.0", "--allow-remote"])
+    (_, _, first), (_, _, second) = served
+    assert first
+    assert second != first
+    err = capsys.readouterr().err
+    assert f"Authorization: Bearer {first}" in err
+    assert "not encrypted" in err
+
+
+def test_http_token_from_the_environment(served: list, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PROBO_HTTP_TOKEN", "t" * 40)
+    cli.main(["--transport", "streamable-http", "--host", "0.0.0.0", "--allow-remote"])
+    cli.main(["--transport", "streamable-http"])  # also enforced on loopback when set
+    assert [token for _, _, token in served] == ["t" * 40, "t" * 40]
+
+
+def test_short_http_tokens_are_refused(served: list, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PROBO_HTTP_TOKEN", "hunter2")
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main(["--transport", "streamable-http", "--host", "0.0.0.0", "--allow-remote"])
+    assert exit_info.value.code == 2
+    assert served == []

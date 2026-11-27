@@ -44,7 +44,7 @@ Connect it to Claude Desktop, Claude Code or any MCP client, and ask things like
 
     ---
 
-    Walks the whole document archive with progress updates and extracts the text from PDFs, so Claude can
+    Walks the whole document archive with progress updates and extracts the text from PDFs (scans come back as page images), so Claude can
     read the meeting papers rather than just list them.
 
     [:octicons-arrow-right-24: Tools](features/tools.md)

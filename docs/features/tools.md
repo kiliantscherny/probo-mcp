@@ -16,7 +16,7 @@ that opens the same page in your browser, where you're already logged in.
 | `list_documents` | One folder of the document archive (`date`, `alphabetical` or `created` order). |
 | `recent_documents` | ProBo's "recently added" widget. This usually shows only a handful of files. |
 | `find_documents` | Walks **every** folder, filtering by upload date (`added_within_days`) and/or file name, and reports progress as it goes. |
-| `read_document` | Extracts the text from a PDF or text file (by document id or attachment path). |
+| `read_document` | Extracts the text from a PDF or text file (by document id or attachment path). Scanned pages come back as images. |
 | `download_document` | Saves a file to your download folder. Large files ask first. |
 | `list_info_pages` / `get_info_page` | The association's information pages (house rules, contacts, …). |
 | `open_probo_browser` | Opens the [interactive browser](interactive-browser.md) in clients that support MCP Apps. |
@@ -87,7 +87,21 @@ It reads the same settings as the server, e.g. `uv run --env-file .env probo-mcp
 PDFs are read with pypdf's layout mode, which follows the page's geometry. Text drawn word by word
 doesn't come out one word per line, and table rows stay on one line
 (`Fællesbidrag   kr.   5.340.000   5.193.000`). Runs of padding spaces are shortened to keep it compact.
-Scanned PDFs have no text to extract.
+
+### Scanned PDFs
+
+Scanned pages have no text layer, so there is nothing to extract. `read_document` then attaches the
+pages as images, which the model reads itself, handwriting and stamps included. A page counts as
+scanned when it has an image and no text, so a text PDF with a scanned appendix returns its text plus
+images of the appendix pages only.
+
+- Pages are rendered in greyscale, 1568 pixels on the long side (30-100 KB as JPEG, roughly 2,000
+  tokens each for the model).
+- Up to 5 pages per call. `note` says when there are more, and `start_page` gets the next ones.
+- `page_count`, `scanned_pages` and `page_images` in the result say which pages are scans and which
+  are attached.
+- `whats_new` and `fetch_history` save scans as they are; their `.txt` file is missing, and the note
+  points to `read_document`.
 
 ## Paging and search
 

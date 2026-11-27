@@ -131,7 +131,13 @@ See [Interactive browser](features/interactive-browser.md) for the HTML side.
 `cache_hints` (SEP-2549) let clients cache the catalogue for an hour and resource reads briefly.
 `subscriptions=False`, because a read-only server that fetches on demand has nothing to push.
 
+`read_document` uses the same pattern to attach **image content**: for scanned PDFs, each scanned page
+follows the result as an `image` block (a greyscale JPEG) for the model to read, after a short
+"Page N of M:" text block that labels it.
+
 ## Transports
 
 `probo-mcp` runs over stdio by default and over streamable HTTP with `--transport streamable-http`.
+Over HTTP, an ASGI middleware in front of the SDK's Starlette app can require a bearer token
+(`PROBO_HTTP_TOKEN`); see [Streamable HTTP](get-started/other-clients.md#streamable-http).
 Logs always go to stderr, because stdout carries the protocol.

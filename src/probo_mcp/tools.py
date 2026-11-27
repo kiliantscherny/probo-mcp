@@ -1,10 +1,12 @@
 """MCP tools. Every tool is read-only with respect to ProBo."""
 
+import base64
+import json
 import logging
 from typing import Annotated, Literal
 
 from mcp.server.mcpserver import Context, Elicit, MCPServer, Resolve
-from mcp.types import CallToolResult, ResourceLink, TextContent, ToolAnnotations
+from mcp.types import CallToolResult, ImageContent, ResourceLink, TextContent, ToolAnnotations
 from pydantic import BaseModel, Field, create_model
 
 from . import archive
@@ -203,9 +205,23 @@ async def find_documents(
 async def read_document(
     ctx: Context,
     document: Annotated[str, Field(description="A document id, or an attachment `path` from another tool.")],
-) -> DocumentText:
-    """Fetch a document and return its text (PDF and plain-text files)."""
-    return await service_from(ctx).read_document(document)
+    start_page: Annotated[int, Field(ge=1, description="For scanned PDFs: the first page to show as an image.")] = 1,
+) -> Annotated[CallToolResult, DocumentText]:
+    """Fetch a document and return its text (PDF and plain-text files).
+
+    Scanned PDF pages (no text layer) come back as images, a few per call: read them yourself.
+    `note` says how to get the next ones.
+    """
+    doc, pages = await service_from(ctx).read_document_with_scans(document, start_page=start_page)
+    data = doc.model_dump(mode="json")
+    images: list[TextContent | ImageContent] = []
+    for p in pages:
+        images.append(TextContent(type="text", text=f"Page {p.page} of {doc.page_count}:"))
+        images.append(ImageContent(type="image", data=base64.b64encode(p.jpeg).decode(), mime_type="image/jpeg"))
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps(data, ensure_ascii=False)), *images],
+        structured_content=data,
+    )
 
 
 class DownloadConfirmation(BaseModel):

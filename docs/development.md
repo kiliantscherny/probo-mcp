@@ -86,21 +86,28 @@ stages the package with a `uv` runtime shim, and validates and packs with
 3. The **Release** workflow checks that the tag matches the version, runs the checks, builds the wheel,
    sdist and `.mcpb`, and publishes a GitHub release with them attached.
 
+The build job has a read-only token. Only the publish job can write, and it runs no project code.
+Build provenance attestations are added when the repository is public, because GitHub only offers them
+for private repositories on Enterprise plans. `SHA256SUMS` is published either way.
+
 ## Project layout
 
 ```text
 src/probo_mcp/
-├── __main__.py      CLI (stdio / streamable HTTP)
+├── __main__.py      CLI (stdio / streamable HTTP, --set-password, --fetch-history)
+├── http_auth.py     bearer-token check for streamable HTTP
 ├── server.py        MCPServer assembly: metadata, lifespan, cache hints, extensions
 ├── tools.py         tools (+ elicitation resolver)
 ├── resources.py     probo:// templates + completions
 ├── prompts.py       prompts
 ├── ui/              MCP App: browser.html + vendored ext-apps SDK
 ├── state.py         lifespan state + error translation
-├── service.py       ProBo operations (no MCP)
+├── service.py       ProBo operations (no MCP), PDF text and page images
+├── archive.py       whats_new / fetch_history: the local archive
 ├── parsers.py       HTML → models (no I/O)
 ├── markdown.py      models → Markdown
 ├── client.py        HTTP: login, allowlist, cache
 ├── config.py        settings + op:// resolution
+├── credentials.py   system keychain
 └── models.py        Pydantic output models
 ```

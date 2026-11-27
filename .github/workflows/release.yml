@@ -50,6 +50,8 @@ jobs:
           name: dist
           path: dist
       - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        # Attestations need a public repository (or GitHub Enterprise); SHA256SUMS is published either way.
+        if: github.event.repository.visibility == 'public'
         with:
           subject-path: |
             dist/*.whl

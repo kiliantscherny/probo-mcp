@@ -37,8 +37,8 @@ on your computer.
   password itself, so only the reference, or nothing, is in its environment.
 - **Downloaded files are marked as from the internet** (macOS quarantine, Windows zone mark), so the
   OS warns before an attachment from another resident runs. Downloads stop at `PROBO_MAX_DOWNLOAD_MB`.
-- **The HTTP transport has no authentication.** It only listens on this computer unless you pass
-  `--allow-remote`.
+- **The HTTP transport listens only on this computer** unless you pass `--allow-remote`, which then
+  requires a bearer token (see [Running over HTTP](#running-over-http)).
 - Accounts that use MitID or two-factor authentication aren't supported, because the server can't
   complete those logins.
 - The session cookie only lives in the server's memory.
@@ -64,7 +64,14 @@ review what a model suggests before acting on it.
 
 ## Running over HTTP
 
-`--transport streamable-http` has no authentication. Bind it to `127.0.0.1` only.
+`--transport streamable-http` listens on `127.0.0.1` by default, where the MCP SDK also blocks
+requests from web pages (DNS-rebinding protection). Other programs on this computer can still connect,
+unless you set `PROBO_HTTP_TOKEN`.
+
+With `--allow-remote` every request must carry `Authorization: Bearer <token>`. The token comes from
+`PROBO_HTTP_TOKEN`, or is generated at start-up. It's compared in constant time, and short tokens are
+refused. HTTP isn't encrypted, so use a tunnel (SSH, Tailscale) rather than an open port. See
+[Streamable HTTP](get-started/other-clients.md#streamable-http).
 
 ## Reporting a vulnerability
 

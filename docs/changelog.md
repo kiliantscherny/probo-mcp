@@ -3,7 +3,7 @@
 All notable changes are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/)
 and the project uses [semantic versioning](https://semver.org/).
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-11-27)
 
 First release.
 
@@ -17,11 +17,14 @@ First release.
 - `fetch_history` and `probo-mcp --fetch-history`: save all past news, the whole document archive
   and optionally older messages to the local archive.
 - PDF text keeps reading order and table rows (pypdf layout mode, with plain mode for rotated text).
+- Scanned PDF pages come back from `read_document` as images (5 per call, `start_page` for more),
+  rendered with pypdfium2.
 - Security: the password comes from the system keychain by default (`probo-mcp --set-password`; on
   macOS every read needs approval), never appears in reprs or logs, and only goes to `*.probo.dk`
   sites. The login form isn't re-sent on redirects. Downloads are capped (`PROBO_MAX_DOWNLOAD_MB`),
   streamed, and marked as from the internet. Files are written atomically without following symlinks.
-  The HTTP transport refuses non-local hosts without `--allow-remote`. CI actions are pinned to
+  The HTTP transport refuses non-local hosts without `--allow-remote`, which requires a bearer token
+  (`PROBO_HTTP_TOKEN`, or a random one per start). CI actions are pinned to
   commits, and releases are built read-only and published with provenance and checksums.
 - PDF text extraction, and downloads that ask before saving large files (elicitation).
 - `probo://` resource templates with argument completion, plus three prompts.

@@ -13,6 +13,7 @@ All settings are environment variables. The Claude Desktop extension sets them f
 | `PROBO_CONFIRM_DOWNLOAD_MB` | | `10` | Ask before saving files larger than this, when the client supports elicitation. |
 | `PROBO_CACHE_SECONDS` | | `60` | How long fetched pages are reused. Set `0` to disable. |
 | `PROBO_LOG_LEVEL` | | `WARNING` | Log level for stderr (`DEBUG`, `INFO`, …). |
+| `PROBO_HTTP_TOKEN` | | | Over [streamable HTTP](get-started/other-clients.md#streamable-http): the bearer token clients must send (32+ characters). Required with `--allow-remote`, where a random one is made if unset. |
 
 If a required setting is missing, the server still starts. Every tool then returns an error explaining
 what to set, which is easier to fix than a client reporting "server failed to start".

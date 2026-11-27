@@ -1,5 +1,6 @@
 """Shared fixtures: a fake ProBo site (respx) serving synthetic HTML fixtures."""
 
+import io
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
@@ -55,6 +56,28 @@ def make_pdf(text: str) -> bytes:
 
 
 PDF = make_pdf("Hello from the ProBo archive")
+
+
+def make_mixed_pdf(pages: str) -> bytes:
+    """A PDF with one page per letter: ``T`` text, ``S`` a scan (an image, no text), ``B`` blank."""
+    from PIL import Image
+    from pypdf import PdfReader, PdfWriter
+
+    writer = PdfWriter()
+    for kind in pages:
+        if kind == "B":
+            writer.add_blank_page(612, 792)
+            continue
+        if kind == "T":
+            content = make_pdf("A page with real text")
+        else:
+            buf = io.BytesIO()
+            Image.new("L", (306, 396), 200).save(buf, "PDF", resolution=36)  # 8.5 x 11 inches
+            content = buf.getvalue()
+        writer.add_page(PdfReader(io.BytesIO(content)).pages[0])
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue()
 
 
 def pdf_headers(name: str = "Budget 2026.pdf") -> dict[str, str]:

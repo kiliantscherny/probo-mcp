@@ -27,6 +27,7 @@ until `remaining` is 0. It saves files and returns a short list, not their conte
 - For "documents added in the last N days" use find_documents(added_within_days=N): \
 recent_documents only shows a handful.
 - Attachment `path` values from get_message / get_news / get_info_page work with read_document.
+- Scanned PDFs have no text: read_document then attaches the pages as images for you to read.
 - Every item has a `url` the user can open in their browser.
 - Nothing can be sent, changed or deleted in ProBo through this server.
 """

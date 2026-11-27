@@ -18,8 +18,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--allow-remote",
         action="store_true",
-        help="Allow --host to be reachable from other computers. The HTTP transport has no authentication: "
-        "anyone who can reach it can read your ProBo.",
+        help="Allow --host to be reachable from other computers. Clients must then send a bearer token "
+        "(PROBO_HTTP_TOKEN, or a random one printed at start-up). Traffic is not encrypted: use a tunnel.",
     )
     parser.add_argument(
         "--fetch-history",
@@ -57,18 +57,44 @@ def main(argv: list[str] | None = None) -> None:
         anyio.run(_fetch_all_history, tuple(args.fetch_history or ("news", "document")))
         return
 
-    if args.transport == "streamable-http" and not args.allow_remote and not _is_loopback(args.host):
-        parser.error(
-            f"--host {args.host} would let other computers read your ProBo (there is no authentication). "
-            "Use 127.0.0.1, or add --allow-remote if you really mean it."
-        )
+    if args.transport == "stdio":
+        from .server import mcp
 
+        mcp.run("stdio")
+        return
+
+    from .http_auth import MIN_TOKEN_LENGTH, new_token
+
+    remote = not _is_loopback(args.host)
+    if remote and not args.allow_remote:
+        parser.error(
+            f"--host {args.host} would let other computers read your ProBo. "
+            "Use 127.0.0.1, or add --allow-remote (which requires a token) if you really mean it."
+        )
+    token = os.environ.get("PROBO_HTTP_TOKEN", "").strip() or None
+    if token is not None and len(token) < MIN_TOKEN_LENGTH:
+        parser.error(f"PROBO_HTTP_TOKEN must be at least {MIN_TOKEN_LENGTH} characters (try: openssl rand -hex 32)")
+    if remote and token is None:
+        token = new_token()
+        print(
+            f"probo-mcp: clients must send the header\n  Authorization: Bearer {token}\n"
+            "Set PROBO_HTTP_TOKEN to keep one token across restarts.",
+            file=sys.stderr,
+        )
+    if remote:
+        print("probo-mcp: HTTP is not encrypted; reach this server through a tunnel (SSH, Tailscale).", file=sys.stderr)
+    _serve_http(args.host, args.port, token)
+
+
+def _serve_http(host: str, port: int, token: str | None) -> None:
+    """Serve streamable HTTP, behind the token check when there is a token."""
+    import uvicorn
+
+    from .http_auth import RequireToken
     from .server import mcp
 
-    if args.transport == "stdio":
-        mcp.run("stdio")
-    else:
-        mcp.run("streamable-http", host=args.host, port=args.port)
+    app = mcp.streamable_http_app(host=host)  # on loopback hosts this also turns on DNS-rebinding protection
+    uvicorn.run(RequireToken(app, token) if token else app, host=host, port=port, log_level="warning")
 
 
 def _is_loopback(host: str) -> bool:

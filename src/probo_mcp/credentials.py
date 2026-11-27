@@ -14,8 +14,10 @@ ask per read: any program running as your user can read an unlocked keychain.
 
 from __future__ import annotations
 
+import importlib
 import subprocess
 import sys
+from types import ModuleType
 from urllib.parse import urlparse
 
 SERVICE = "probo-mcp"
@@ -101,10 +103,12 @@ def delete_password(base_url: str, username: str) -> bool:
     return True
 
 
-def _keyring():
+def _keyring() -> ModuleType:
+    # Imported by name: keyring is installed everywhere but macOS, so a plain import (or an ignore
+    # comment for it) fails the type check on one platform or the other.
     try:
-        import keyring  # ty: ignore[unresolved-import] - not installed on macOS, which doesn't need it
-        import keyring.errors  # ty: ignore[unresolved-import]
+        keyring = importlib.import_module("keyring")
+        importlib.import_module("keyring.errors")
     except ImportError as e:  # pragma: no cover - a dependency on Windows and Linux
         raise CredentialError("The 'keyring' package is needed to use the system keychain here") from e
     return keyring

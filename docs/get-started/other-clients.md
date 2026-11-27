@@ -53,11 +53,30 @@ runs a local checkout with its settings in an `.env` file (keychain or `op://` r
 probo-mcp --transport streamable-http --host 127.0.0.1 --port 8000
 ```
 
-The endpoint is then `http://127.0.0.1:8000/mcp`.
+The endpoint is then `http://127.0.0.1:8000/mcp`. Only programs on this computer can reach it.
 
-!!! danger "Keep it local"
-    Over HTTP the server holds a logged-in ProBo session and has **no authentication of its own**.
-    Bind it to `127.0.0.1` only. Never expose it to a network.
+### Requiring a token
+
+Set `PROBO_HTTP_TOKEN` to make clients send `Authorization: Bearer <token>`; requests without it get
+`401`. Make one with `openssl rand -hex 32` (at least 32 characters):
+
+```sh
+PROBO_HTTP_TOKEN=$(openssl rand -hex 32) probo-mcp --transport streamable-http
+```
+
+### From another computer
+
+`--allow-remote` lets `--host` be a network address, and then a token is **always** required. Without
+`PROBO_HTTP_TOKEN` the server makes a random one and prints it at start-up, so it changes on every start.
+
+```sh
+probo-mcp --transport streamable-http --host 0.0.0.0 --allow-remote
+```
+
+!!! danger "The token is your ProBo login"
+    Anyone with the token can read everything your ProBo account can. HTTP is **not encrypted**, so on a
+    network the token could be read along the way: reach the server through an SSH tunnel or a VPN such
+    as Tailscale instead of exposing the port.
 
 ## MCP Inspector
 
