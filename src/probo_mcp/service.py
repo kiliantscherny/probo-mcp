@@ -449,6 +449,9 @@ def _page_ranges(pages: list[int]) -> str:
 
 # pypdf warns about rotated text in layout mode; _page_text handles that by falling back to plain mode.
 logging.getLogger("pypdf._text_extraction._layout_mode._fixed_width_page").setLevel(logging.ERROR)
+# pypdf 7 suggests fontTools for some fonts, once per font per page. Tested on real association
+# PDFs, fontTools changed no extracted text, so the hint is only noise in the server log.
+logging.getLogger("pypdf._cmap").addFilter(lambda record: not record.getMessage().startswith("fontTools is required"))
 _COLUMN_GAP = re.compile(r" {3,}")
 _BLANK_LINES = re.compile(r"\n{3,}")
 

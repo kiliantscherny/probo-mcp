@@ -61,9 +61,11 @@ class FakeKeyring(types.ModuleType):
     def __init__(self) -> None:
         super().__init__("keyring")
         self.store: dict[tuple[str, str], str] = {}
+        keyring_error = type("KeyringError", (Exception,), {})
+        # setattr, since a module's attributes aren't declared; works with every ty version's rule names.
         errors = types.ModuleType("keyring.errors")
-        errors.KeyringError = type("KeyringError", (Exception,), {})  # ty: ignore[unresolved-attribute]
-        errors.PasswordDeleteError = type("PasswordDeleteError", (errors.KeyringError,), {})  # ty: ignore[unresolved-attribute]
+        setattr(errors, "KeyringError", keyring_error)  # noqa: B010
+        setattr(errors, "PasswordDeleteError", type("PasswordDeleteError", (keyring_error,), {}))  # noqa: B010
         self.errors = errors
 
     def get_password(self, service: str, name: str) -> str | None:
